@@ -1529,17 +1529,24 @@
     box-shadow: 0 4px 8px rgba(15, 23, 42, 0.08), 0 14px 28px rgba(15, 23, 42, 0.12);
 }
 
-.notification-bell.has-unread::after {
-    content: "";
+.notification-bell-count {
     position: absolute;
-    top: 2px;
-    right: 2px;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
+    top: -4px;
+    right: -4px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 999px;
     background: #ef4444;
     border: 2px solid rgba(26, 35, 126, 0.85);
     box-sizing: content-box;
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .notification-item.unread {
