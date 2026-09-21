@@ -290,10 +290,9 @@ export function useTransactionForm({
     }
     setRateMiddlemanAmount(middleStr);
 
-    // From preview: gross − Service Fee only. Rate-Mul 不再影响顾客金额（顾客固定拿 gross，
-    // Rate-Mul 产生的 commission 只体现在 Middle-Man Amount）。PT-Fee 同样不动 From/表单金额，只落 PLATFORM_FEE 行。
+    // To preview: gross − Middle-Man Amount（finalFeeDec，含 Rate-Mul + Fee，两个都填就都扣）。
     // Calc uses full precision; formatRateAmount is display-only half-up 2.
-    const toAmountDeductionDec = parsePositiveAmt(rateMiddlemanInputAmount);
+    const toAmountDeductionDec = finalFeeDec;
 
     try {
       const fromDec = MoneyDecimal.toDecimal(clean(rateCurrencyFromAmount) || "0", 0);
