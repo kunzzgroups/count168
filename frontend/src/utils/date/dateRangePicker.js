@@ -269,19 +269,14 @@ export function ensureMaintenanceDateRangePicker() {
     };
   }
 
-  /** Modal unmount can leave binding pointing at removed hidden inputs — fall back to toolbar / defaults. */
-  function ensureActiveBindingTargets() {
-    const fromId = activeRangeBinding?.dateFromId;
-    const toId = activeRangeBinding?.dateToId;
-    if (fromId && toId && document.getElementById(fromId) && document.getElementById(toId)) {
-      return;
-    }
+  /** Bind the shared singleton to the page's own Capture Date picker (falls back to bare defaults). */
+  function bindActiveRangeToCaptureDatePicker() {
     const toolbarPicker =
       document.querySelector(".bank-process-toolbar-primary .date-range-picker#date-range-picker") ||
       document.getElementById("date-range-picker");
     if (toolbarPicker) {
       setActiveRangeBindingFromTrigger(toolbarPicker);
-      return;
+      return true;
     }
     activeRangeBinding = {
       dateFromId: config.dateFromId,
@@ -291,6 +286,17 @@ export function ensureMaintenanceDateRangePicker() {
       collapseSingleDisplay: false,
       hideClear: false,
     };
+    return false;
+  }
+
+  /** Modal unmount can leave binding pointing at removed hidden inputs — fall back to toolbar / defaults. */
+  function ensureActiveBindingTargets() {
+    const fromId = activeRangeBinding?.dateFromId;
+    const toId = activeRangeBinding?.dateToId;
+    if (fromId && toId && document.getElementById(fromId) && document.getElementById(toId)) {
+      return;
+    }
+    bindActiveRangeToCaptureDatePicker();
   }
 
   function notifyActivePickerChanged() {
@@ -1252,6 +1258,10 @@ export function ensureMaintenanceDateRangePicker() {
       const toDate = parseDmy(toDmy || fromDmy) || new Date(fromDate);
       fromDate.setHours(0, 0, 0, 0);
       toDate.setHours(0, 0, 0, 0);
+      // This API is only ever used for Capture Date — force-bind to its own picker so a
+      // previously-focused single-date picker (e.g. Transaction Date, which collapses a
+      // same-day range to one date) can't leak its ids or display-collapse setting here.
+      bindActiveRangeToCaptureDatePicker();
       calendarStartDate = fromDate;
       calendarEndDate = toDate;
       isSelectingRange = false;
