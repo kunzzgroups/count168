@@ -30,6 +30,7 @@ import {
   transactionQueryKeys,
 } from "../lib/transactionApi.js";
 import { buildOptimisticSubmitDeltas } from "../lib/transactionSubmitHelpers.js";
+import { parseDmyToDate } from "../lib/transactionPaymentPageUtils.js";
 import { getTxSearchCache, setTxSearchCache, clearTxSearchCache } from "../../../utils/transaction/transactionSearchCache.js";
 import {
   buildDefaultSearchApiParams,
@@ -61,6 +62,21 @@ const INITIAL_TRANSACTION_SEARCH_STATE = {
   showPaymentOnly: false,
   showZeroBalance: false,
 };
+
+/** Anchor submit-focus Capture Date range at "today": a past tx date extends the range
+ *  forward to today, a future tx date extends it backward from today. */
+function resolveSubmitFocusDateRange(txDate, todayDmy) {
+  const tx = String(txDate || "").trim();
+  const today = String(todayDmy || "").trim();
+  if (!tx) return { from: today, to: today };
+  if (!today || tx === today) return { from: tx, to: tx };
+  const txDt = parseDmyToDate(tx);
+  const todayDt = parseDmyToDate(today);
+  if (!txDt || !todayDt) return { from: tx, to: tx };
+  return txDt.getTime() < todayDt.getTime()
+    ? { from: tx, to: today }
+    : { from: today, to: tx };
+}
 
 function syncCaptureDateDom(dateFromDmy, dateToDmy) {
   const from = String(dateFromDmy || "").trim();
@@ -1298,6 +1314,7 @@ export function useTransactionSearch({
       if (!effectiveDateFrom || !effectiveDateTo) return;
 
       const txDate = String(transactionDate || "").trim();
+      const focusRange = resolveSubmitFocusDateRange(txDate, todayDmy);
       // RATE submits pass [fromCurrency, toCurrency]; other types pass a single string.
       const currencyCodes = [
         ...new Set(
@@ -1333,10 +1350,10 @@ export function useTransactionSearch({
         hasAutoJumpedCaptureDateOnSubmitRef.current = true;
 
         didJumpCaptureDate =
-          txDate !== effectiveDateFrom || txDate !== effectiveDateTo;
-        searchDateFrom = txDate;
-        searchDateTo = txDate;
-        rangeKey = `${txDate}|${txDate}`;
+          focusRange.from !== effectiveDateFrom || focusRange.to !== effectiveDateTo;
+        searchDateFrom = focusRange.from;
+        searchDateTo = focusRange.to;
+        rangeKey = `${focusRange.from}|${focusRange.to}`;
         prevCaptureDateRangeKeyRef.current = rangeKey;
 
         categoriesOverride = [];
@@ -1374,10 +1391,10 @@ export function useTransactionSearch({
 
         if (txDate) {
           didJumpCaptureDate =
-            txDate !== effectiveDateFrom || txDate !== effectiveDateTo;
-          searchDateFrom = txDate;
-          searchDateTo = txDate;
-          rangeKey = `${txDate}|${txDate}`;
+            focusRange.from !== effectiveDateFrom || focusRange.to !== effectiveDateTo;
+          searchDateFrom = focusRange.from;
+          searchDateTo = focusRange.to;
+          rangeKey = `${focusRange.from}|${focusRange.to}`;
           prevCaptureDateRangeKeyRef.current = rangeKey;
         }
 
@@ -1421,9 +1438,9 @@ export function useTransactionSearch({
       flushSync(() => {
         if (clearLeftToSubmitFocus) {
           if (txDate) {
-            setDateFrom(txDate);
-            setDateTo(txDate);
-            syncCaptureDateDom(txDate);
+            setDateFrom(focusRange.from);
+            setDateTo(focusRange.to);
+            syncCaptureDateDom(focusRange.from, focusRange.to);
           }
           setSelectedCategories([]);
           categoryChangedByUserRef.current = false;
@@ -1434,9 +1451,9 @@ export function useTransactionSearch({
             showZeroBalance: false,
           };
         } else if (didJumpCaptureDate) {
-          setDateFrom(txDate);
-          setDateTo(txDate);
-          syncCaptureDateDom(txDate);
+          setDateFrom(focusRange.from);
+          setDateTo(focusRange.to);
+          syncCaptureDateDom(focusRange.from, focusRange.to);
         }
 
         if (currencyStateToApply && currencyStateToApply.length > 0) {
