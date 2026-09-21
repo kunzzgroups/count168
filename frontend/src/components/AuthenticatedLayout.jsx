@@ -354,11 +354,6 @@ export default function AuthenticatedLayout() {
     { enabled: Boolean(me) },
   );
 
-  const unreadAnnouncementCount = useMemo(
-    () => announcements.filter((row) => !seenAnnouncementIds.has(Number(row?.id))).length,
-    [announcements, seenAnnouncementIds],
-  );
-
   // --- Avatar Selector State ---
   const [showAvatarOptions, setShowAvatarOptions] = useState(false);
   const initialAvatarId = readCookie("selectedAvatar") || "male1";
@@ -383,11 +378,8 @@ export default function AuthenticatedLayout() {
     modalMessage: expirationModalMessage,
     modalI18n: expirationModalI18n,
     mergeAnnouncements,
-    hasBellBadge,
     onBellOpen,
   } = useExpirationReminder(me, lang);
-  /** Sidebar bell badge count = unseen announcements + the expiration reminder card (if unread). */
-  const bellUnreadCount = unreadAnnouncementCount + (hasBellBadge ? 1 : 0);
   const displayAnnouncements = useMemo(
     () => mergeAnnouncements(announcements),
     [announcements, mergeAnnouncements],
@@ -1467,15 +1459,10 @@ export default function AuthenticatedLayout() {
               </SidebarMenuTooltip>
             )}
             <img src={assetUrl("images/count_whitelogo.png")} alt="EAZYCOUNT" className="header-logo" />
-            <div className={`notification-bell${bellUnreadCount > 0 ? " has-unread" : ""}`} onClick={toggleNotifications}>
+            <div className="notification-bell" onClick={toggleNotifications}>
                 <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <path d="M12 2C10.34 2 9 3.34 9 5V5.29C6.72 6.15 5.12 8.39 5.01 11L5 11V16L3 18V19H21V18L19 16V11C18.88 8.39 17.28 6.15 15 5.29V5C15 3.34 13.66 2 12 2ZM12 22C10.9 22 10 21.1 10 20H14C14 21.1 13.1 22 12 22Z" />
                 </svg>
-                {bellUnreadCount > 0 && (
-                  <span className="notification-bell-count" aria-label={`${bellUnreadCount} unread`}>
-                    {bellUnreadCount > 99 ? "99+" : bellUnreadCount}
-                  </span>
-                )}
             </div>
           </div>
           <div className="user-info-container">
