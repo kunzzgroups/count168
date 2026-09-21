@@ -1535,15 +1535,15 @@
     top: -1px;
     right: -1px;
     z-index: 1;
-    min-width: 13px;
-    height: 13px;
+    min-width: 11px;
+    height: 11px;
     padding: 0 3px;
     border-radius: 999px;
     background: #ef4444;
     border: 1.5px solid rgba(26, 35, 126, 0.85);
     box-sizing: content-box;
     color: #fff;
-    font-size: 8px;
+    font-size: 10px;
     font-weight: 700;
     line-height: 1;
     display: flex;
