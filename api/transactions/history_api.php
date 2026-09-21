@@ -2723,18 +2723,17 @@ try {
         $description = $row['entry_description'] ?: 'RATE';
         $platformFeeRemark = null;
 
-        // RATE 后缀：业务上的 From Account（付款方）= RATE_FIRST_FROM、RATE_TRANSFER_TO；
-        // 业务上的 To Account（收款方）= RATE_FIRST_TO、RATE_TRANSFER_FROM —— 注意 RATE_TRANSFER_FROM/TO
-        // 这两个 entry_type 名字和账号绑定是反的（见 submit_api.php 对应注释）。
-        // 哪一边显示 Rate-Mul：乘除模式方向一致，都是 To Account 显示 Rate-Mul、From Account 显示原始汇率。
+        // RATE 后缀：注意 RATE_TRANSFER_FROM/TO 这两个 entry_type 名字和账号绑定是反的
+        // （见 submit_api.php 对应注释），所以不按"业务上的收款/付款方"判断，直接按
+        // entry_type 字面后缀判断：_TO 显示 Rate-Mul，_FROM 显示原始汇率——这样 leg1
+        // （RATE_FIRST_*）与 leg2（RATE_TRANSFER_*）两组各自方向自然对齐。
         // 差价（原汇率 − Rate-Mul）算 Middle-Man 的利润，不计入 From/To 两个 account 之间的汇兑描述，
         // 所以未命中的一侧留空，交给 formatExchangeRateDescription 回退显示原始汇率。
         $displayRateForSuffix = null;
         if (in_array($entryType, ['RATE_FIRST_FROM', 'RATE_FIRST_TO', 'RATE_TRANSFER_FROM', 'RATE_TRANSFER_TO'], true)) {
             $middlemanRate = $row['rate_middleman_rate'] ?? null;
             $isDivideMode = (bool) preg_match('/\(\s*\/[^)]*\)/', (string) ($row['rate_middleman_entry_description'] ?? ''));
-            $isBusinessToAccount = in_array($entryType, ['RATE_FIRST_TO', 'RATE_TRANSFER_FROM'], true);
-            $showMiddlemanRateHere = $isBusinessToAccount;
+            $showMiddlemanRateHere = in_array($entryType, ['RATE_FIRST_TO', 'RATE_TRANSFER_TO'], true);
             if ($showMiddlemanRateHere && $middlemanRate !== null && $middlemanRate !== '') {
                 $displayRateForSuffix = $isDivideMode
                     ? ('/' . money_out($middlemanRate, 6))
