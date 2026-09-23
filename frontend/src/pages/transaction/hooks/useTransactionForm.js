@@ -78,11 +78,6 @@ export function useTransactionForm({
   t,
 }) {
   const [txType, setTxTypeRaw] = useState("CONTRA");
-  const setTxType = useCallback((next) => {
-    const v = String(next || "").trim().toUpperCase();
-    if (v === "RECEIVE") return;
-    setTxTypeRaw(v || "CONTRA");
-  }, []);
   useEffect(() => {
     if (txType === "RECEIVE") setTxTypeRaw("CONTRA");
   }, [txType]);
@@ -118,6 +113,25 @@ export function useTransactionForm({
   const [rateMiddlemanAmount, setRateMiddlemanAmount] = useState("");
   const [rateMiddlemanInputAmount, setRateMiddlemanInputAmount] = useState("");
   const [rateMiddlemanPlatformFee, setRateMiddlemanPlatformFee] = useState("");
+
+  // Type switch keeps whichever date was picked in sync across the two independent
+  // date fields (txDate for standard types, rateDate for RATE), instead of RATE
+  // falling back to today just because rateDate was never written to.
+  const setTxType = useCallback(
+    (next) => {
+      const v = String(next || "").trim().toUpperCase();
+      if (v === "RECEIVE") return;
+      const nextType = v || "CONTRA";
+      if (nextType === "RATE" && txType !== "RATE") {
+        setRateDate(txDate);
+      } else if (nextType !== "RATE" && txType === "RATE") {
+        setTxDate(rateDate);
+      }
+      setTxTypeRaw(nextType);
+    },
+    [txType, txDate, rateDate],
+  );
+
   const queryClient = useQueryClient();
 
   const changeTxAmount = useCallback((val) => {
