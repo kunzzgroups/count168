@@ -7,6 +7,7 @@ import {
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   parseRateExpression,
+  computeRateGrossAmount,
   buildClientRequestId,
   parseBalanceValue,
   countRateDecimalPlaces,
@@ -321,7 +322,10 @@ export function useTransactionForm({
         return;
       }
 
-      const baseGross = fromDec.times(rateDec);
+      // Apply the rate expression directly to the amount (not via the 8dp-truncated `rateDec`)
+      // so a non-terminating `/divisor` (e.g. /17630) doesn't lose precision before the multiply.
+      const preciseGross = computeRateGrossAmount(fromDec, rateExchangeRateRaw);
+      const baseGross = preciseGross !== null ? preciseGross : fromDec.times(rateDec);
 
       const grossDisplayStr = formatRateAmount(baseGross.toString());
       setRateToAmountGrossStr(grossDisplayStr);

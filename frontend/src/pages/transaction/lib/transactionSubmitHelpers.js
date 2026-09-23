@@ -2,6 +2,7 @@ import {
   formatAmountForStore,
   RATE_STORE_MAX_DECIMALS,
   parseRateExpression,
+  computeRateGrossAmount,
 } from "./transactionFormat.js";
 import MoneyDecimal from "../../../utils/money/moneyDecimal.js";
 
@@ -211,13 +212,21 @@ export function buildRatePayload({
   const fromDec = MoneyDecimal.toDecimal(cleanAmt(fromAmt) || "0", 0);
 
   // Rebuild gross at full precision (UI may have rounded toGrossStr to 2dp for display).
+  // Apply the rate expression directly to fromDec (not via the 8dp-truncated
+  // `parsedRateNormalizedStr`) so a non-terminating `/divisor` doesn't lose precision
+  // before the multiply — that loss gets amplified once fromAmt is large.
   let grossDec;
   try {
-    const rateDec = MoneyDecimal.toDecimal(cleanAmt(parsedRateNormalizedStr) || "0", 0);
-    if (fromDec.gt(0) && rateDec.gt(0)) {
-      grossDec = fromDec.times(rateDec);
+    const precise = fromDec.gt(0) ? computeRateGrossAmount(fromDec, rateExchangeRateRaw) : null;
+    if (precise !== null) {
+      grossDec = precise;
     } else {
-      grossDec = MoneyDecimal.toDecimal(cleanAmt(toGrossStr) || "0", 0);
+      const rateDec = MoneyDecimal.toDecimal(cleanAmt(parsedRateNormalizedStr) || "0", 0);
+      if (fromDec.gt(0) && rateDec.gt(0)) {
+        grossDec = fromDec.times(rateDec);
+      } else {
+        grossDec = MoneyDecimal.toDecimal(cleanAmt(toGrossStr) || "0", 0);
+      }
     }
   } catch {
     grossDec = MoneyDecimal.toDecimal(cleanAmt(toGrossStr) || "0", 0);
