@@ -268,7 +268,6 @@ export default function TransactionAddSection({
               onClick={() => {
                 setRateToAccount(rateFromAccount);
                 setRateFromAccount(rateToAccount);
-                onRateCurrencyRowReverse?.();
               }}
             >
               {m.reverse}
