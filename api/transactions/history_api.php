@@ -2979,8 +2979,8 @@ try {
                 } else {
                     // 汇率兑换本身：Currency Exchange (FROM amount > TO)；Rate 按分录类型区分（Member）
                     // - RATE_FIRST_FROM / RATE_FIRST_TO：不展示 Rate
-                    // - RATE_TRANSFER_FROM：divide 模式换算净汇率（逻辑不变，无效则回退原始），multiply 模式恒原始
-                    // - RATE_TRANSFER_TO：divide 模式恒原始（不变），multiply 模式直接显示 Rate-Mul 原始值
+                    // - RATE_TRANSFER_TO：显示 Rate-Mul（除法/乘法方向一致，跟 admin/Payment History 对齐）
+                    // - RATE_TRANSFER_FROM（及其余非 FIRST 类型，如 RATE_FEE）：显示原始汇率
                     $fromCode = $event['from_currency_code'] ?? null;
                     $toCode = $event['to_currency_code'] ?? null;
                     $fromAmount = $event['rate_from_amount'] ?? null;
@@ -2989,25 +2989,34 @@ try {
                     $isDivideMode = (bool) preg_match('/\(\s*\/[^)]*\)/', (string) ($event['rate_middleman_entry_description'] ?? ''));
 
                     $rateForSuffix = null;
-                    // divide 模式下需要与 admin/Payment History 一致，展示 Middle-Man 输入的原始除数
-                    // （如 "/1.71"），而不是 exchange_rate 存的倒数小数（如 "0.588235"）或净汇率计算值。
+                    // divide 模式下需要与 admin/Payment History 一致，展示原始除数形式（如 "/1.71"），
+                    // 而不是 exchange_rate 存的倒数小数（如 "0.588235"）。
                     $rateForSuffixIsExpression = false;
                     if (!in_array($entryType, ['RATE_FIRST_FROM', 'RATE_FIRST_TO'], true)) {
-                        if ($isDivideMode) {
-                            if ($middlemanRate !== null && (string) $middlemanRate !== '') {
-                                $rateForSuffix = '/' . money_out($middlemanRate, 6);
-                                $rateForSuffixIsExpression = true;
-                            } elseif ($exchangeRate !== null && $exchangeRate !== '' && money_cmp($exchangeRate, '0') > 0) {
-                                $rateForSuffix = '/' . money_out(money_div('1', $exchangeRate, 8), 6);
-                                $rateForSuffixIsExpression = true;
+                        if ($entryType === 'RATE_TRANSFER_TO') {
+                            if ($isDivideMode) {
+                                if ($middlemanRate !== null && (string) $middlemanRate !== '') {
+                                    $rateForSuffix = '/' . money_out($middlemanRate, 6);
+                                    $rateForSuffixIsExpression = true;
+                                } elseif ($exchangeRate !== null && $exchangeRate !== '' && money_cmp($exchangeRate, '0') > 0) {
+                                    $rateForSuffix = '/' . money_out(money_div('1', $exchangeRate, 8), 6);
+                                    $rateForSuffixIsExpression = true;
+                                }
+                            } else {
+                                $rateForSuffix = ($middlemanRate !== null && $middlemanRate !== '')
+                                    ? money_out($middlemanRate, 6)
+                                    : (($exchangeRate !== null && $exchangeRate !== '') ? $exchangeRate : null);
                             }
-                        } elseif ($entryType === 'RATE_TRANSFER_TO') {
-                            $rateForSuffix = ($middlemanRate !== null && $middlemanRate !== '')
-                                ? money_out($middlemanRate, 6)
-                                : (($exchangeRate !== null && $exchangeRate !== '') ? $exchangeRate : null);
                         } else {
-                            // 其余情况（RATE_TRANSFER_FROM 乘法模式、RATE_FEE 等）：使用原始汇率
-                            $rateForSuffix = ($exchangeRate !== null && $exchangeRate !== '') ? $exchangeRate : null;
+                            // 其余情况（RATE_TRANSFER_FROM、RATE_FEE 等）：使用原始汇率
+                            if ($isDivideMode) {
+                                if ($exchangeRate !== null && $exchangeRate !== '' && money_cmp($exchangeRate, '0') > 0) {
+                                    $rateForSuffix = '/' . money_out(money_div('1', $exchangeRate, 8), 6);
+                                    $rateForSuffixIsExpression = true;
+                                }
+                            } else {
+                                $rateForSuffix = ($exchangeRate !== null && $exchangeRate !== '') ? $exchangeRate : null;
+                            }
                         }
                     }
 
