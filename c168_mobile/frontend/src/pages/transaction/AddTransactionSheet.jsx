@@ -8,6 +8,7 @@ import {
   formatRateAmount,
   formatAmountForStore,
   parseRateExpression,
+  computeRateGrossAmount,
   RATE_STORE_MAX_DECIMALS,
   TX_STORE_MAX_DECIMALS,
 } from "../../lib/transactionFormat.js";
@@ -485,7 +486,10 @@ export default function AddTransactionSheet({
         setRateToAmountGrossStr("");
         return;
       }
-      const baseGross = fromDec.times(rateDec);
+      // Apply the rate expression directly to the amount (not via the 8dp-truncated
+      // `rateDec`) so a non-terminating `/divisor` doesn't lose precision before the multiply.
+      const preciseGross = computeRateGrossAmount(fromDec, rateExchangeRateRaw);
+      const baseGross = preciseGross !== null ? preciseGross : fromDec.times(rateDec);
       setRateToAmountGrossStr(formatRateAmount(baseGross.toString()));
       let displayVal = baseGross;
       if (!toAmountDeductionDec.isZero()) displayVal = displayVal.minus(toAmountDeductionDec);

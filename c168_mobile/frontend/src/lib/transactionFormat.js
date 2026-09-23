@@ -224,6 +224,80 @@ export function parseRateExpression(rawValue) {
   return { valid: true, value: out };
 }
 
+/**
+ * Computes `fromAmount` combined with the raw rate expression directly (amount op token op token...),
+ * instead of first collapsing the expression into a rate value via `parseRateExpression` — whose
+ * `value` is truncated to 8dp for storage/display. For a `/divisor` that doesn't divide evenly
+ * (e.g. `/17630`), multiplying by that truncated reciprocal amplifies the lost precision once the
+ * amount is large. Applying the same operators straight to the amount defers rounding to the very
+ * end, so the result only loses precision at display/storage scale, not mid-calculation.
+ * Returns a Decimal, or null when the expression/amount is invalid.
+ */
+export function computeRateGrossAmount(fromAmount, rawRateValue) {
+  let fromDec;
+  try {
+    fromDec = MoneyDecimal.toDecimal(fromAmount);
+  } catch {
+    return null;
+  }
+  if (!fromDec.gt(0)) return null;
+
+  const normalized = String(rawRateValue ?? "").trim().replace(/÷/g, "/").replace(/\s+/g, "");
+  if (!normalized) return null;
+
+  if (/^\/\d*\.?\d+$/.test(normalized)) {
+    if (hasTokenExceedingRateDecimals(normalized.slice(1))) return null;
+    let divisor;
+    try {
+      divisor = MoneyDecimal.toDecimal(normalized.slice(1));
+    } catch {
+      return null;
+    }
+    if (divisor.lte(0)) return null;
+    return fromDec.div(divisor);
+  }
+
+  if (!/^[0-9.*/]+$/.test(normalized)) return null;
+  if (/^[*/]|[*/]$|[*/]{2,}/.test(normalized)) return null;
+
+  const tokens = normalized.split(/([*/])/).filter(Boolean);
+  if (tokens.length === 0) return null;
+  if (!/^\d*\.?\d+$/.test(tokens[0])) return null;
+  if (hasTokenExceedingRateDecimals(tokens[0])) return null;
+
+  let firstFactor;
+  try {
+    firstFactor = MoneyDecimal.toDecimal(tokens[0]);
+  } catch {
+    return null;
+  }
+  if (firstFactor.lte(0)) return null;
+
+  let result = fromDec.times(firstFactor);
+  for (let i = 1; i < tokens.length; i += 2) {
+    const op = tokens[i];
+    const numToken = tokens[i + 1];
+    if (!numToken || !/^\d*\.?\d+$/.test(numToken)) return null;
+    if (hasTokenExceedingRateDecimals(numToken)) return null;
+    let value;
+    try {
+      value = MoneyDecimal.toDecimal(numToken);
+    } catch {
+      return null;
+    }
+    if (op === "*") {
+      result = result.times(value);
+    } else if (op === "/") {
+      if (value.isZero()) return null;
+      result = result.div(value);
+    } else {
+      return null;
+    }
+  }
+  if (result.lte(0)) return null;
+  return result;
+}
+
 export function formatRateAmount(value) {
   try {
     return MoneyDecimal.formatFixedHalfUp(value || "0", 2);
