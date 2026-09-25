@@ -59,6 +59,7 @@ function fetchProcesses(PDO $pdo, int $company_id, bool $groupScope = false) {
         FROM process p
         LEFT JOIN description d ON p.description_id = d.id
         WHERE p.company_id = ?
+          AND p.status IN ('active','inactive')
     ";
     if ($groupScope) {
         $sql .= dcSqlGroupProcessFilter('p');
@@ -191,6 +192,7 @@ function fetchDomainReportRows(
 
     $sql .= "
         WHERE p.company_id = ?
+          AND p.status IN ('active','inactive')
     ";
     $params[] = $processCompanyId;
     $sql .= $scopeProcessSql !== '' ? $scopeProcessSql : dcSqlCompanyProcessFilter('p');
