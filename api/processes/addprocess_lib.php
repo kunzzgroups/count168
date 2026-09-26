@@ -177,7 +177,8 @@ function getDescriptionById(PDO $pdo, int $descriptionId): ?array {
 }
 
 function getProcessUsageCountForDescription(PDO $pdo, int $descriptionId, int $companyId): int {
-    $stmt = $pdo->prepare("SELECT COUNT(*) FROM process WHERE description_id = ? AND company_id = ?");
+    // status = 'waiting' 代表 process 已被软删除，视为未占用该 description
+    $stmt = $pdo->prepare("SELECT COUNT(*) FROM process WHERE description_id = ? AND company_id = ? AND status IN ('active','inactive')");
     $stmt->execute([$descriptionId, $companyId]);
     return (int)$stmt->fetchColumn();
 }
