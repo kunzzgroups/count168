@@ -14,6 +14,7 @@ import { buildApiUrl } from "../../utils/apiUrl.js";
 import {
   clearToken,
   describeBiometry,
+  biometryReport,
   getDeviceId,
   getDeviceName,
   loadToken,
@@ -57,6 +58,8 @@ export default function SettingsPage() {
   const [bioExpiresAt, setBioExpiresAt] = useState("");
   const [bioCount, setBioCount] = useState(0);
   const [bioBusy, setBioBusy] = useState(false);
+  // 仅“原生不可用”时填：APK 关了 web 调试拿不到 console，靠界面一行字诊断
+  const [bioUnavailableReason, setBioUnavailableReason] = useState("");
   const [bioError, setBioError] = useState("");
   const i18n = useMemo(() => MORE_I18N[lang] || MORE_I18N.en, [lang]);
 
@@ -131,6 +134,10 @@ export default function SettingsPage() {
           setBioEnabled(Boolean(storedToken));
           return;
         }
+        // 原生插件没应答 → 记下原因，界面上一行短字（APK 关了 web 调试，只能靠这个）
+        const report = await biometryReport();
+        if (cancelled) return;
+        setBioUnavailableReason(report);
         // 插件不应答 → 不当原生处理，往下走（至少还有免登录可用）
       }
 
@@ -304,7 +311,12 @@ export default function SettingsPage() {
               )}
             </div>
 
-            {/* 只在真的出错时提示一行；成功/正常状态不占任何文字 */}
+            {/* 可用时一行字都不显示；不可用时必须给一行原因，否则就是个沉默的死开关 */}
+            {!bioSupported && bioUnavailableReason ? (
+              <p className="m-more-settings-hint">{`[${bioUnavailableReason}]`}</p>
+            ) : null}
+
+            {/* 只在真的出错时提示一行 */}
             {bioError ? (
               <p className="m-more-settings-hint m-more-settings-hint--error" role="alert">
                 {bioError}

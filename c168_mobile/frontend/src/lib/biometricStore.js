@@ -79,7 +79,8 @@ export function isNative() {
 export async function isAvailable() {
   if (!isNative()) return false;
   try {
-    const result = await BiometricAuth.checkBiometry();
+    // 加超时：原生插件不响应时不能把调用方（设置页、登录引导）卡住
+    const result = await withTimeout(BiometricAuth.checkBiometry(), 4000);
     return result?.isAvailable === true;
   } catch {
     return false;
@@ -93,7 +94,10 @@ export async function isAvailable() {
 export async function describeBiometry() {
   if (!isNative()) return "";
   try {
-    const result = await BiometricAuth.checkBiometry();
+    // ⚠️ 必须加超时：这个调用在插件不响应时永远不会 settle，
+    // 而调用方（设置页的检测 effect）会 await 它 —— 结果是页面永远停在加载／
+    // 开关看起来“不可用”。实机上报过“安卓没有可用的生物识别”。
+    const result = await withTimeout(BiometricAuth.checkBiometry(), 4000);
     if (result?.isAvailable !== true) return "";
 
     switch (Number(result.biometryType)) {
@@ -205,6 +209,32 @@ export async function clearToken() {
     await SecureStorage.remove(TOKEN_KEY);
   } catch {
     /* 已经是清空状态 */
+  }
+}
+
+/**
+ * 仅用于诊断：原生生物识别的真实返回。
+ *
+ * 为何需要：APK 里 webContentsDebuggingEnabled=false，拿不到 console；
+ * 而“不可用”可能来自好几个原因（插件不响应 / 超时 / 本身返回不可用）。
+ * 把原因缩成一句短文本显示在界面上，一张截图就能定位。
+ */
+export async function biometryReport() {
+  if (!isNative()) return "not-native";
+
+  let plat = "?";
+  try {
+    plat = Capacitor.getPlatform();
+  } catch {
+    /* 忽略 */
+  }
+
+  try {
+    const result = await withTimeout(BiometricAuth.checkBiometry(), 4000);
+    if (result === null) return `timeout (plat=${plat})`;
+    return `available=${result.isAvailable} type=${result.biometryType} plat=${plat}`;
+  } catch (err) {
+    return `error ${err?.message || err} (plat=${plat})`;
   }
 }
 
