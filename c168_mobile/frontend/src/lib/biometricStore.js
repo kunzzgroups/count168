@@ -243,13 +243,13 @@ export function clearBioOptOut() {
  *   { ok: true,  biometryType, biometryTypes, isAvailable, strongBiometryIsAvailable }
  *   { ok: false, why }
  */
-export async function biometryInfo() {
+export async function biometryInfo(timeoutMs = 4000) {
   if (!isNative()) return { ok: false, why: "not-native" };
 
   // 自己管超时，不用 withTimeout —— 后者把“超时”和“抛错”都归成 null，
   // 而这两者的排查方向完全不同。
   const timeout = new Promise((resolve) =>
-    setTimeout(() => resolve({ ok: false, why: "timeout" }), 4000),
+    setTimeout(() => resolve({ ok: false, why: "timeout" }), timeoutMs),
   );
   const call = BiometricAuth.checkBiometry().then(
     (r) => ({

@@ -14,12 +14,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
+  biometryInfo,
   clearToken,
   getDeviceId,
   isNative,
   loadToken,
   withTimeout,
 } from "../lib/biometricStore.js";
+import {
+  METHOD,
+  autoSwitchTarget,
+  capabilityFromProbe,
+  ensureSettings,
+  saveSettings,
+} from "../lib/biometricSettings.js";
 import { nativeBiometricLogin } from "../lib/biometricLogin.js";
 
 export const GATE_CHECKING = "checking";
@@ -143,6 +151,37 @@ export function useBiometricUnlock() {
    * 真正失效的凭据（令牌过期 / 被吐销）由 unlock() 里的
    * PERMANENT_FAILURE_CODES 分支清理，那里清才是对的。
    */
+  /**
+   * 弹生物识别**之前**的方式校正。
+   *
+   * 为何要放在前面，而不是等失败后再补救：
+   * 等失败后再换的话，用户会先看到一次**注定失败**的认证（实机反馈：
+   * “没有直接弹出人脸识别”），然后才弹正确的那一次 —— 多一次、且莫名其妙。
+   *
+   * 产品要求：用户选的方式在这台设备上没了（比如在系统里删了指纹）
+   * → **自动换成另一种、不询问**。
+   *
+   * ⚠️ 两条约束：
+   *   1. 探测**明确**说目标可用才换（autoSwitchTarget 内部就要求 === true）；
+   *   2. 探测限时 1.5s —— 不能因为探测慢就拖住解锁；超时 = 未知 = 不换，
+   *      直接按原方式试。
+   */
+  const preflightThenUnlock = useCallback(async () => {
+    try {
+      const settings = ensureSettings(Boolean(await withTimeout(loadToken(), 4000)));
+      const cap = capabilityFromProbe(await biometryInfo(1500));
+      const target = autoSwitchTarget(settings.method, cap);
+      if (target) {
+        // 显式写入：自动切换是产品要求，但**仍然一次性写完整模型**
+        saveSettings({ enabled: true, method: target });
+      }
+    } catch {
+      /* 探测/读取失败 → 当成未知，不换方式，直接按原方式试 */
+    }
+    await unlock();
+  }, [unlock]);
+
+
   const usePasswordInstead = useCallback(async () => {
     await goDisabled(false);
     navigate("/login", { replace: true });
@@ -179,12 +218,12 @@ export function useBiometricUnlock() {
     return () => clearTimeout(timer);
   }, [state]);
 
-  // 进入锁屏后自动弹一次指纹
+  // 进入锁屏后自动弹一次；┖─ 弹之前先校正方式，确保**第一次就是正确的方式**。
   useEffect(() => {
     if (state !== GATE_LOCKED || attemptGuard.current) return;
     attemptGuard.current = true;
-    void unlock();
-  }, [state, unlock]);
+    void preflightThenUnlock();
+  }, [state, preflightThenUnlock]);
 
   return { state, busy, failure, attempts, unlock, usePasswordInstead };
 }

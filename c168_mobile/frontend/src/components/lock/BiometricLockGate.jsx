@@ -1,13 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { readLoginLang } from "../../lib/loginLang.js";
-import {
-  METHOD,
-  autoSwitchTarget,
-  capabilityFromProbe,
-  ensureSettings,
-  saveSettings,
-} from "../../lib/biometricSettings.js";
-import { biometryInfo, loadToken } from "../../lib/biometricStore.js";
+import { METHOD, ensureSettings, saveSettings } from "../../lib/biometricSettings.js";
+import { loadToken } from "../../lib/biometricStore.js";
 import {
   FAIL_BIOMETRIC,
   GATE_CHECKING,
@@ -127,61 +121,6 @@ export default function BiometricLockGate({ children }) {
   // **所有 hook 在每一次渲染中都按同一顺序被调用**。一旦 hook 落在提前 return
   // 之后，解锁那一瞬间 hook 数量就会变 → React 抛错 → **整个 App 白屏**。
   // 实机白屏就是这么来的（之前那个位置下面一个 hook 也没有，所以是新增代码触发的）。
-  //
-  // 自动换只尝试一次 —— 否则探测一直说不确定时会陷入无限重试。
-  const autoTried = useRef(false);
-  // 自动换不了（探测未知 / 另一种也没了）退化成手动按钮，并把原因说出来
-  const [switchManually, setSwitchManually] = useState(false);
-
-  // 主题在登录页之外也可能被切换，这里跟随
-  useEffect(() => {
-    setLang(readLoginLang());
-  }, [state]);
-
-  // 读取权威设置；顺带把旧键迁到新模型（凭据是否存在要问 Keystore）
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      let credentialPresent = false;
-      try {
-        credentialPresent = Boolean(await loadToken());
-      } catch {
-        credentialPresent = false;
-      }
-      if (cancelled) return;
-      setMethod(ensureSettings(credentialPresent).method);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [state]);
-
-  // 产品要求：用户选的那种方式在这台设备上没了（例如在系统设置里删了指纹）
-  // → **自动换成另一种、不询问**。但只在探测明确说目标可用时才换
-  // （见 autoSwitchTarget 的说明：未知一律不换，不确定就不改用户设置）。
-  useEffect(() => {
-    const gone = Boolean(failure) && methodUnavailable(failure.code);
-    if (!gone || autoTried.current) return undefined;
-    autoTried.current = true;
-    let cancelled = false;
-    (async () => {
-      const cap = capabilityFromProbe(await biometryInfo());
-      if (cancelled) return;
-      const target = autoSwitchTarget(method, cap);
-      if (!target) {
-        // 探测没给明确答案 → **绝不乱改设置**，把选择交给用户
-        setSwitchManually(true);
-        return;
-      }
-      saveSettings({ enabled: true, method: target });
-      setMethod(target);
-      void unlock();
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [failure, method]);
 
   const t = TEXT[lang] || TEXT.en;
 
@@ -220,10 +159,14 @@ export default function BiometricLockGate({ children }) {
     </button>
   );
 
-  // 用户选的那种方式在这台设备上没了（例如在系统设置里删了指纹）。
-  // 产品要求：**自动换成另一种、不询问**（见 autoSwitchTarget）。
+  // 自动校正已经移到**弹窗之前**（见 hooks/useBiometricUnlock.js 的
+  // preflightThenUnlock）：在那里判断一次，就能保证**第一次弹的就是正确的方式**，
+  // 用户不会先看到一次注定失败的认证。
+  //
+  // 这里只保留**手动回退** —— 当自动换不了（探测没给出明确答案）时，
+  // 用户仍然有路可走，但要不要换由他决定。
   const otherMethod = method === METHOD.FINGERPRINT ? METHOD.FACE : METHOD.FINGERPRINT;
-  const offerSwitch = Boolean(failure) && methodUnavailable(failure.code) && switchManually;
+  const offerSwitch = Boolean(failure) && methodUnavailable(failure.code);
 
   const switchMethod = (target) => {
     saveSettings({ enabled: true, method: target });
