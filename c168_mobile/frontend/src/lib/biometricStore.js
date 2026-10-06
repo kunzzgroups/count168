@@ -22,6 +22,13 @@ import { Capacitor } from "@capacitor/core";
 import { BiometricAuth, BiometryType, AndroidBiometryStrength } from "@aparajita/capacitor-biometric-auth";
 import { SecureStorage } from "@aparajita/capacitor-secure-storage";
 import { readLoginLang } from "./loginLang.js";
+import {
+  METHOD,
+  disabledSettings,
+  ensureSettings,
+  resolveBiometric,
+  saveSettings,
+} from "./biometricSettings.js";
 
 /**
  * 安全存储的 key 前缀，必须与其它插件隔离。
@@ -169,35 +176,24 @@ export function getDeviceName() {
  * 所以只传 reason（安卓上用作文案，iOS 上是必填的 localizedReason）。
  */
 /**
- * 安卓上用户选的是「指纹」还是「人脸」。
+ * 用户选了指纹还是人脸 —— **统一从权威模型读**。
  *
- * ⚠️ 安卓**没有**「只用人脸」这个开关：系统 BiometricPrompt 与插件原生层
- * 都只区分强/弱生物识别（AuthActivity.java 里只有 BIOMETRIC_STRONG / WEAK /
- * DEVICE_CREDENTIAL）。所以这个偏好能落地的程度分两种：
- *
- *   fingerprint → androidBiometryStrength: strong → **真的只出指纹** ✓
- *                 （安卓上人脸几乎都是「弱」生物识别，会被排除）
- *   face        → androidBiometryStrength: weak   → 系统可能仍给指纹 ✗
- *
- * 存在本机 localStorage：它描述的是「这台设备的用户偏好」，不该跨设备同步。
+ * 旧实现这里有一行静默回退：
+ *     getItem(MODALITY_KEY) === "face" ? "face" : "fingerprint"
+ * 任何意外值（空、脏数据、旧版写入）都会变成指纹 —— 违反规格 §7，
+ * 也正是用户报过的「不知为何又变回指纹」。现在未知就是 NONE，
+ * 由 resolveBiometric() 统一处理，不在这里猜。
  */
-const MODALITY_KEY = "ec_biometric_modality";
-
-export function readModalityPref() {
-  try {
-    return window.localStorage.getItem(MODALITY_KEY) === "face" ? "face" : "fingerprint";
-  } catch {
-    return "fingerprint";
-  }
+export function readBiometricSettings(credentialPresent = false) {
+  return ensureSettings(credentialPresent);
 }
 
-export function writeModalityPref(value) {
-  try {
-    window.localStorage.setItem(MODALITY_KEY, value === "face" ? "face" : "fingerprint");
-  } catch {
-    /* 存不下就退到默认值，不阻断流程 */
-  }
+/** 写回权威模型（一次 JSON 写入，不存在 enabled/method 不一致的中间态） */
+export function writeBiometricSettings(patch) {
+  return saveSettings({ ...ensureSettings(false), ...patch });
 }
+
+export { disabledSettings, METHOD };
 
 /**
  * 用户是否已经拒绝过「开启生物识别」引导。
@@ -272,11 +268,20 @@ export async function biometryInfo() {
 
 export async function authenticate() {
   const lang = readLoginLang();
-  const modality = readModalityPref();
+  // 权威来源：单一设置模型（没有“任何意外值都变指纹”的静默回退）
+  let credentialPresent = false;
+  try {
+    credentialPresent = Boolean(await loadToken());
+  } catch {
+    credentialPresent = false;
+  }
+  const settings = ensureSettings(credentialPresent);
+  // 强度只能由 resolver 决定 —— 它是唯一允许做这个判断的地方
+  const plan = resolveBiometric(settings, { state: "UNKNOWN" });
   // 文案尽量短（系统弹窗上方已显示应用名），而且**不写具体方式**。
   //
   // 实机反馈：用户选了人脸，文案写「验证人脸」，但安卓弹出来的仍是指纹界面
-  // —— 因为安卓没法强制只出人脸（见 readModalityPref 上方说明）；
+  // —— 因为安卓没法强制只出人脸（见 lib/biometricSettings.js 的 resolveBiometric 说明）；
   // 两种都录入时，系统总是优先给「强」的那个，通常就是指纹。
   // 文案跟着偏好走就会与系统实际界面矛盾，所以这里只说「要验证身份」。
   const reason = lang === "zh" ? "验证身份以登录" : "Verify your identity to sign in";
@@ -290,9 +295,11 @@ export async function authenticate() {
     // 不允许用锁屏密码兜底：这里要的是「生物识别」本身，
     // 允许设备凭据会让「指纹解锁」名不副实。
     allowDeviceCredential: false,
-    // 按用户的选择限定强度（见 readModalityPref 上方说明）。
+    // 按用户的选择限定强度（强度由 resolveBiometric 给出，见 lib/biometricSettings.js）
     androidBiometryStrength:
-      modality === "face" ? AndroidBiometryStrength.weak : AndroidBiometryStrength.strong,
+      plan.promptStrength === "strong"
+        ? AndroidBiometryStrength.strong
+        : AndroidBiometryStrength.weak,
     // 仍然**不传** androidSubtitle：它与 reason 是两个不同的显示位置，
     // 传同一个字符串会上下显示两遍（见文件顶部说明）。
   });

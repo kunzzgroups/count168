@@ -19,7 +19,7 @@ export const MORE_I18N = {
     bioEnableFailed: "Could not enable biometric unlock.",
     bioDeviceLimit: "Could not enable biometric unlock. Please try again.",
     bioPasskeys: "Passkeys",
-    // 安卓专用：让用户选指纹还是人脸（见 lib/biometricStore.js 的 readModalityPref）
+    // 安卓专用：让用户选指纹还是人脸（见 lib/biometricSettings.js 的 readBiometricSettings）
     //
     // 标签必须诚实：选人脸时安卓仍可能弹指纹（平台无「只用人脸」开关），
     // 写成单纯的 “Face” 就是承诺了做不到的事。

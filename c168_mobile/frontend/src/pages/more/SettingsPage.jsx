@@ -20,12 +20,18 @@ import {
   getDeviceName,
   isNative,
   loadToken,
-  readModalityPref,
   saveToken,
   withTimeout,
   writeBioOptOut,
-  writeModalityPref,
 } from "../../lib/biometricStore.js";
+import {
+  CAP,
+  METHOD,
+  disabledSettings,
+  ensureSettings,
+  resolveBiometric,
+  saveSettings,
+} from "../../lib/biometricSettings.js";
 import { registerDeviceToken, revokeDeviceToken } from "../../lib/deviceTokenApi.js";
 import {
   createPasskey,
@@ -63,8 +69,8 @@ export default function SettingsPage() {
   const [bioExpiresAt, setBioExpiresAt] = useState("");
   const [bioCount, setBioCount] = useState(0);
   const [bioBusy, setBioBusy] = useState(false);
-  /** 用户选的是 fingerprint | face，存本机（见 lib/biometricStore.js 的 readModalityPref） */
-  const [bioModality, setBioModality] = useState(() => readModalityPref());
+  /** 用户选的方式，取自权威模型（METHOD.NONE | FINGERPRINT | FACE） */
+  const [bioModality, setBioModality] = useState(() => ensureSettings(false).method);
   const [bioError, setBioError] = useState("");
   /**
    * ⚠️ 临时诊断：**每次改动必须递增这个号**。
@@ -76,7 +82,7 @@ export default function SettingsPage() {
    *
    * 初始值故意非空：如果连这一行都不显示，那就不是探测失败而是**包没更新**。
    */
-  const BIO_BUILD = "b13";
+  const BIO_BUILD = "b14";
   const [bioDiag, setBioDiag] = useState("boot");
   const i18n = useMemo(() => MORE_I18N[lang] || MORE_I18N.en, [lang]);
 
@@ -148,22 +154,36 @@ export default function SettingsPage() {
     } catch {
       label = "";
     }
-    // 拿到设备报告的生物识别信息。**只用于诊断显示**，不参与任何门槛
-    // （拿它当门槛就是之前两端置灰的原因）。
+    // 设备能力：**只用于诊断与能力展示**，不参与任何“能不能用”的门槛。
+    // （拿它当门槛就是之前两端置灰的原因。）
+    // 注意“未知”是一个独立状态：探测超时 / 报错都归为 UNKNOWN，
+    // **绝不塌缩成「不可用」** —— 那正是 BUG-3。
     const info = await biometryInfo();
-    const probe = info.ok
-      ? `types=[${info.biometryTypes.join(",")}] weak=${info.isAvailable ? 1 : 0} strong=${
-          info.strongAvailable ? 1 : 0
-        }`
-      : `probe=${info.why}`;
+    const capability = !info.ok
+      ? { state: CAP.UNKNOWN }
+      : info.code === "biometryLockout"
+        ? { state: CAP.TEMPORARILY_LOCKED }
+        : !info.isAvailable && !info.strongAvailable
+          ? { state: CAP.NOT_ENROLLED }
+          : {
+              state: CAP.AVAILABLE,
+              fingerprintAvailable: info.biometryTypes.includes(3),
+              faceAvailable: info.biometryTypes.includes(4) || info.biometryTypes.includes(5),
+            };
+
     return {
       mode: "native",
       // 在原生壳里就是支持的：同一台机器的登录页已经能用指纹。
       supported: true,
-      enabled: Boolean(token),
+      credentialPresent: Boolean(token),
       label,
       count: 0,
-      note: `token=${token ? "yes" : "no"} ${probe}`,
+      capability,
+      note: info.ok
+        ? `types=[${info.biometryTypes.join(",")}] weak=${info.isAvailable ? 1 : 0} strong=${
+            info.strongAvailable ? 1 : 0
+          } token=${token ? "yes" : "no"}`
+        : `probe=${info.why} token=${token ? "yes" : "no"}`,
     };
   }, []);
 
@@ -200,9 +220,22 @@ export default function SettingsPage() {
         setBioMode(r.mode);
         setBioTypeLabel(r.label || "");
         setBioSupported(r.supported);
-        setBioEnabled(r.enabled);
         setBioCount(r.count || 0);
-        setBioDiag(`native=${native ? 1 : 0} mode=${r.mode} sup=${r.supported ? 1 : 0} ${r.note}`);
+        // 权威状态只从模型读；这次探测顺带把旧键迁到新模型。
+        // enabled 不再由“有没有凭据”**推导** —— 那是两个来源（BUG-4）；
+        // 凭据是否存在本次只作为迁移时的校验输入。
+        const settings = ensureSettings(Boolean(r.credentialPresent));
+        const plan = resolveBiometric(settings, r.capability);
+        if (cancelled) return;
+        setBioEnabled(settings.enabled);
+        setBioModality(settings.method);
+        setBioDiag(
+          `enabled=${settings.enabled ? 1 : 0} method=${settings.method} capability=${
+            r.capability?.state || CAP.UNKNOWN
+          } strategy=${plan.strategy} startable=${plan.startable ? 1 : 0}${
+            plan.reason ? ` reason=${plan.reason}` : ""
+          } | ${r.note || ""}`,
+        );
       } catch (err) {
         // ⚠️ 探测自己抛错也必须留下痕迹，否则就是个沉默的死开关。
         // 这正是之前几轮的现象：探测里调了一个没 import 的函数（isNative），
@@ -259,6 +292,8 @@ export default function SettingsPage() {
           // 主动关掉 = 明确的拒绝 → 登录页的引导也不该再弹。
           // （不记下来的话，关掉之后每次登录都会被问 —— 已经出过这个问题。）
           writeBioOptOut();
+          // 权威模型一次性写入 DISABLED（不存在 enabled/method 不一致的中间态）
+          saveSettings(disabledSettings());
           setBioEnabled(false);
           setBioDiag("mode=native tap=off OK");
           return;
@@ -280,6 +315,13 @@ export default function SettingsPage() {
         await saveToken(issued.token);
         // 重新开启 → 撕掉之前的拒绝标记
         clearBioOptOut();
+        // 权威模型：开启 + 方式。方式保持不变；**没有方式时给一个明确默认**，
+        // 而不是留给 resolver 去猜。
+        saveSettings({
+          enabled: true,
+          method: bioModality === METHOD.FACE ? METHOD.FACE : METHOD.FINGERPRINT,
+        });
+        setBioModality(bioModality === METHOD.FACE ? METHOD.FACE : METHOD.FINGERPRINT);
         setBioEnabled(true);
         setBioDiag(`mode=native tap=on OK token=${issued.token ? "saved" : "MISSING"}`);
       } catch (err) {
@@ -402,13 +444,15 @@ export default function SettingsPage() {
               <div className="m-more-settings-row">
                 <span>{i18n.bioModality || "Unlock with"}</span>
                 <MobileOnOffSwitch
-                  on={bioModality === "face"}
+                  on={bioModality === METHOD.FACE}
                   disabled={false}
                   wide
                   onChange={(next) => {
-                    const value = next ? "face" : "fingerprint";
-                    writeModalityPref(value);
-                    setBioModality(value);
+                    // 切换方式 = 一次完整的状态转移（规格 §11）：
+                    // 校验 → 持久化 → 重建状态。不保留任何旧方式的痕迹。
+                    const value = next ? METHOD.FACE : METHOD.FINGERPRINT;
+                    const saved = saveSettings({ enabled: true, method: value });
+                    setBioModality(saved.method);
                   }}
                   ariaLabel={i18n.bioModality || "Unlock with"}
                   onLabel={i18n.bioModalityFace || "Face"}
