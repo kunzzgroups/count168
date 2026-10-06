@@ -107,10 +107,23 @@ export function passkeyErrorMessage(lang, code, fallback) {
  *   标记清 → 完全不沾 passkey，系统也就不会弹那把失效的凭据，用户正常输入
  */
 const PASSKEY_FLAG_KEY = "ec_passkey_on_device";
+/**
+ * 本机注册到的那把凭据的 ID（base64url）。
+ *
+ * 为什么必须存它：调 navigator.credentials.get() 时如果传**空** allowCredentials，
+ * iOS 可能落到「外部安全密钥（NFC）」那条路 —— 实机上就弹出过
+ * “Use Security Key / Too many NFC devices found”，而不是 Face ID。
+ * 把具体凭据 ID 传给 allowCredentials，iOS 就会去平台验证器（钥匙串）找它，
+ * 从而直接走 Face ID；钥匙串里已经没有它时也不会弹 NFC，而是直接失败。
+ *
+ * 它不是机密：凭据 ID 本来就明文存在钥匙串里，泄露它也无法冒充登录。
+ */
+const PASSKEY_ID_KEY = "ec_passkey_id";
 
-export function markPasskeyOnDevice() {
+export function markPasskeyOnDevice(credentialId = "") {
   try {
     localStorage.setItem(PASSKEY_FLAG_KEY, "1");
+    if (credentialId) localStorage.setItem(PASSKEY_ID_KEY, credentialId);
   } catch {
     /* 隐私模式下不可用，忽略 */
   }
@@ -124,9 +137,19 @@ export function hasPasskeyOnDevice() {
   }
 }
 
+/** 本机那把凭据的 ID；没有则返回 "" */
+export function getPasskeyId() {
+  try {
+    return localStorage.getItem(PASSKEY_ID_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
 export function clearPasskeyOnDevice() {
   try {
     localStorage.removeItem(PASSKEY_FLAG_KEY);
+    localStorage.removeItem(PASSKEY_ID_KEY);
   } catch {
     /* 忽略 */
   }
@@ -311,7 +334,8 @@ export async function createPasskey(deviceName) {
   if (!json?.success) {
     return { ok: false, code: json?.code || "VERIFY_FAILED", message: json?.message || "" };
   }
-  markPasskeyOnDevice();
+  // 记住凭据 ID：登录时要把它传给 allowCredentials，否则 iOS 可能走 NFC 而非 Face ID
+  markPasskeyOnDevice(bytesToB64url(credential.rawId));
   return { ok: true };
 }
 
@@ -322,11 +346,17 @@ export async function createPasskey(deviceName) {
  *   'conditional' → 交给系统自动填充栏，用户点账号栏才出现（不需要按钮）
  *   undefined     → 立即弹生物识别（需要用户手势，多数平台在页面加载时会拒）
  */
-async function runPasskeyLogin({ mediation, signal } = {}) {
+async function runPasskeyLogin({ mediation, signal, credentialId } = {}) {
   const { json: opt } = await postForm("api/session/webauthn_login_options_api.php");
   if (!opt?.success) {
     return { ok: false, code: opt?.code || "OPTIONS_FAILED", message: opt?.message || "" };
   }
+
+  // 有本机凭据 ID 就限定它 —— 这是让 iOS 走 Face ID 而不是 NFC 安全密钥的关键。
+  // 没存过则退回到可发现凭据（空数组）。
+  const allowCredentials = credentialId
+    ? [{ type: "public-key", id: b64urlToBytes(credentialId) }]
+    : [];
 
   let assertion = null;
   try {
@@ -338,7 +368,7 @@ async function runPasskeyLogin({ mediation, signal } = {}) {
         rpId: opt.rpId,
         timeout: opt.timeout,
         userVerification: opt.userVerification,
-        allowCredentials: [],
+        allowCredentials,
       },
     });
   } catch (err) {
@@ -361,6 +391,9 @@ async function runPasskeyLogin({ mediation, signal } = {}) {
   if (json?.status !== "success") {
     return { ok: false, code: json?.code || "VERIFY_FAILED", message: json?.message || "" };
   }
+  // 登录成功也记一次凭据 ID：这样在这项改动之前注册的老凭据，
+  // 会在首次成功登录后自动补上，不需要用户重新注册一次。
+  markPasskeyOnDevice(bytesToB64url(assertion.rawId));
   return { ok: true, redirect: json.redirect || "/dashboard" };
 }
 
@@ -376,7 +409,7 @@ export async function tryImmediatePasskeyLogin({ signal } = {}) {
   if (!webauthnSupported()) {
     return { ok: false, code: "UNSUPPORTED", message: "" };
   }
-  return runPasskeyLogin({ signal });
+  return runPasskeyLogin({ signal, credentialId: getPasskeyId() });
 }
 
 /**
@@ -404,7 +437,7 @@ export async function startConditionalPasskeyLogin({ signal } = {}) {
     return { ok: false, code: "UNSUPPORTED" };
   }
 
-  return runPasskeyLogin({ mediation: "conditional", signal });
+  return runPasskeyLogin({ mediation: "conditional", signal, credentialId: getPasskeyId() });
 }
 /* ── 用 passkey 登录 ────────────────────────────────────────── */
 
