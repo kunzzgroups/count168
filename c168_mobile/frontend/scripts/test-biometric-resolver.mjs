@@ -302,6 +302,27 @@ test("DISABLED / 非法 method → 没有可换的目标", () => {
   assert.equal(autoSwitchTarget("garbage", fpGone), "");
 });
 
+/* ── React 规则（实机白屏就是这么来的）────────────────────────── */
+
+test("锁屏：hook 不得出现在提前 return 之后（否则解锁瞬间白屏）", () => {
+  const lines = src("components", "lock", "BiometricLockGate.jsx").split("\n");
+  const firstEarlyReturn = lines.findIndex((l) => /^\s*return children;/.test(l));
+  assert.notEqual(firstEarlyReturn, -1, "没找到提前 return，测试需要更新");
+
+  // 本组件在已解锁/已关闭时会 `return children`，而 React 要求每次渲染的
+  // hook 调用顺序完全一致；hook 一旦落在它后面，解锁时数量就会变 → 抛错 → 整个 App 白屏。
+  const offenders = lines
+    .map((line, i) => [i + 1, line])
+    .slice(firstEarlyReturn)
+    .filter(([, l]) => /\buse(State|Ref|Effect|Callback|Memo|Context)\s*\(/.test(l));
+
+  assert.deepEqual(
+    offenders,
+    [],
+    `hook 落在提前 return 之后：\n${offenders.map(([n, l]) => `  ${n}: ${l.trim()}`).join("\n")}`,
+  );
+});
+
 /* ── 运行 ─────────────────────────────────────────────────────────── */
 
 let failed = 0;

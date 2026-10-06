@@ -121,6 +121,18 @@ export default function BiometricLockGate({ children }) {
    */
   const [method, setMethod] = useState(() => METHOD.NONE);
 
+  // ⚠️⚠️ 下面这三个 hook 必须在下面那个 `if (...) return children` **之前**。
+  //
+  // 本组件在已解锁 / 已关闭时会提前 return children，而 React 要求
+  // **所有 hook 在每一次渲染中都按同一顺序被调用**。一旦 hook 落在提前 return
+  // 之后，解锁那一瞬间 hook 数量就会变 → React 抛错 → **整个 App 白屏**。
+  // 实机白屏就是这么来的（之前那个位置下面一个 hook 也没有，所以是新增代码触发的）。
+  //
+  // 自动换只尝试一次 —— 否则探测一直说不确定时会陷入无限重试。
+  const autoTried = useRef(false);
+  // 自动换不了（探测未知 / 另一种也没了）退化成手动按钮，并把原因说出来
+  const [switchManually, setSwitchManually] = useState(false);
+
   // 主题在登录页之外也可能被切换，这里跟随
   useEffect(() => {
     setLang(readLoginLang());
@@ -143,6 +155,33 @@ export default function BiometricLockGate({ children }) {
       cancelled = true;
     };
   }, [state]);
+
+  // 产品要求：用户选的那种方式在这台设备上没了（例如在系统设置里删了指纹）
+  // → **自动换成另一种、不询问**。但只在探测明确说目标可用时才换
+  // （见 autoSwitchTarget 的说明：未知一律不换，不确定就不改用户设置）。
+  useEffect(() => {
+    const gone = Boolean(failure) && methodUnavailable(failure.code);
+    if (!gone || autoTried.current) return undefined;
+    autoTried.current = true;
+    let cancelled = false;
+    (async () => {
+      const cap = capabilityFromProbe(await biometryInfo());
+      if (cancelled) return;
+      const target = autoSwitchTarget(method, cap);
+      if (!target) {
+        // 探测没给明确答案 → **绝不乱改设置**，把选择交给用户
+        setSwitchManually(true);
+        return;
+      }
+      saveSettings({ enabled: true, method: target });
+      setMethod(target);
+      void unlock();
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [failure, method]);
 
   const t = TEXT[lang] || TEXT.en;
 
@@ -184,41 +223,13 @@ export default function BiometricLockGate({ children }) {
   // 用户选的那种方式在这台设备上没了（例如在系统设置里删了指纹）。
   // 产品要求：**自动换成另一种、不询问**（见 autoSwitchTarget）。
   const otherMethod = method === METHOD.FINGERPRINT ? METHOD.FACE : METHOD.FINGERPRINT;
-  const needsSwitch = Boolean(failure) && methodUnavailable(failure.code);
-
-  // 自动换只尝试一次 —— 否则探测一直说不确定时会陷入无限重试
-  const autoTried = useRef(false);
-  // 自动换不了（探测未知 / 另一种也没了）退化成手动按钮，并把原因说出来
-  const [switchManually, setSwitchManually] = useState(false);
+  const offerSwitch = Boolean(failure) && methodUnavailable(failure.code) && switchManually;
 
   const switchMethod = (target) => {
     saveSettings({ enabled: true, method: target });
     setMethod(target);
     void unlock();
   };
-
-  useEffect(() => {
-    if (!needsSwitch || autoTried.current) return undefined;
-    autoTried.current = true;
-    let cancelled = false;
-    (async () => {
-      const cap = capabilityFromProbe(await biometryInfo());
-      if (cancelled) return;
-      const target = autoSwitchTarget(method, cap);
-      if (!target) {
-        // 探测没给明确答案 → **绝不乱改设置**，把选择交给用户
-        setSwitchManually(true);
-        return;
-      }
-      switchMethod(target);
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [needsSwitch, method]);
-
-  const offerSwitch = needsSwitch && switchManually;
 
   const switchButton = (primary) => (
     <button
