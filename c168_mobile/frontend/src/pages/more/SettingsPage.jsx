@@ -18,12 +18,7 @@ import {
   loadToken,
   saveToken,
 } from "../../lib/biometricStore.js";
-import {
-  getRememberDevice,
-  registerDeviceToken,
-  revokeDeviceToken,
-  setRememberDevice,
-} from "../../lib/deviceTokenApi.js";
+import { registerDeviceToken, revokeDeviceToken } from "../../lib/deviceTokenApi.js";
 import {
   createPasskey,
   biometricDiagnostic,
@@ -54,7 +49,7 @@ export default function SettingsPage() {
   //   原生（安卓 APK）→ device_token：本地凭据 + 系统指纹弹窗
   //   浏览器有 WebAuthn → passkey：服务端公钥，抗钓鱼
   //   浏览器没 WebAuthn（iOS 独立 App）→ 「保持登录」：30 天免密
-  const [bioMode, setBioMode] = useState("none"); // "native" | "passkey" | "remember"
+  const [bioMode, setBioMode] = useState("none"); // "native" | "passkey" | "none"
   const [bioSupported, setBioSupported] = useState(false);
   const [bioEnabled, setBioEnabled] = useState(false);
   const [bioTypeLabel, setBioTypeLabel] = useState("");
@@ -136,23 +131,17 @@ export default function SettingsPage() {
         // 插件不应答 → 不当原生处理，往下走（至少还有免登录可用）
       }
 
-      // ③ 没有 WebAuthn（也没有可用的原生插件）→ 退化为「保持登录」。
-      //    比起一个永远置灰的开关，免密登录是真实可用的能力。
-      setBioMode("remember");
+      // ③ 没有 WebAuthn（也没有可用的原生插件）→ 开关置灰。
+      //    产品明确不要「30 天免登录」这种替代品，所以不再降级为别的功能。
+      setBioMode("none");
       setBioTypeLabel("");
-      setBioSupported(true);
-      // 产品要求这一行只有 on/off，不放任何说明文字。
-      // 诊断改到 console：屏幕上不占位置，但万一还有问题仍可定位。
+      setBioSupported(false);
       try {
         // eslint-disable-next-line no-console
-        console.warn("[biometric] fallback to remember-mode:", biometricDiagnostic());
+        console.warn("[biometric] unavailable:", biometricDiagnostic());
       } catch {
         /* console 不可用就算了 */
       }
-      const remembered = await getRememberDevice();
-      if (cancelled) return;
-      setBioEnabled(remembered.enabled === true);
-      setBioExpiresAt(remembered.expiresAt || "");
     })();
     return () => {
       cancelled = true;
@@ -185,17 +174,6 @@ export default function SettingsPage() {
           const listed = await listPasskeys();
           setBioCount(listed.count || 0);
           setBioEnabled((listed.count || 0) > 0);
-          return;
-        }
-
-        if (bioMode === "remember") {
-          const result = await setRememberDevice({ enabled: enable });
-          if (!result.ok) {
-            setBioError(result.message || i18n.bioEnableFailed || "Could not change this setting.");
-            return;
-          }
-          setBioEnabled(result.enabled);
-          setBioExpiresAt(result.expiresAt || "");
           return;
         }
 
@@ -233,8 +211,9 @@ export default function SettingsPage() {
 
   // 这一行只显示「标题 + on/off」（产品要求：不要多余说明文字），
   // 所以只需要算出标题。三种后端共用一行，标题跟着模式变，避免名不副实。
-  const bioLabel =
-    bioMode === "remember" ? i18n.rememberDevice || "Stay signed in" : i18n.biometric;
+  // 这一行只显示「标题 + on/off」（产品要求：不要多余说明文字）。
+  // 产品也明确不要「30 天免登录」这种替代品，所以标题固定。
+  const bioLabel = i18n.biometric;
 
   const companyCode = String(me?.company_code || me?.company_id || "").toUpperCase();
   const groupId = String(me?.login_group_id || me?.login_identifier || "").toUpperCase();

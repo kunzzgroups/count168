@@ -56,6 +56,7 @@ const PASSKEY_ERRORS = {
     SECONDARY_PASSWORD_REQUIRED: "请先通过二级密码验证。",
     CREDENTIAL_LIMIT: "注册数量已达上限。",
     NOT_LOGGED_IN: "登录状态已失效，请重新登录。",
+    CREDENTIAL_UNKNOWN: "这把 passkey 已在本账号失效（可能你已在设置里关闭生物识别）。请在「设置 → 密码」里删掉它，或重新开启生物识别。",
     VERIFY_FAILED: "服务器未能验证这次注册。",
   },
   en: {
@@ -75,6 +76,8 @@ const PASSKEY_ERRORS = {
     SECONDARY_PASSWORD_REQUIRED: "Please verify your secondary password first.",
     CREDENTIAL_LIMIT: "You have reached the passkey limit.",
     NOT_LOGGED_IN: "Your session expired. Please login again.",
+    CREDENTIAL_UNKNOWN:
+      "This passkey is no longer valid for this account (biometric unlock may have been turned off). Remove it from Settings > Passwords, or turn biometric unlock back on.",
     VERIFY_FAILED: "The server could not verify this registration.",
   },
 };
@@ -91,6 +94,42 @@ export function passkeyErrorMessage(lang, code, fallback) {
   }
   const base = fallback || (lang === "zh" ? "操作失败。" : "Something went wrong.");
   return code ? `${base} (${code})` : base;
+}
+
+/* ── 本设备是否注册过 passkey（本地标记）──────────────────────
+ *
+ * 为什么必须有这个标记：passkey 存在**用户手机的钥匙串**里，服务端吐销它
+ * **不会**把它从手机删掉。所以在设置里关掉之后，系统仍然会在自动填充栏
+ * 弹出那把已失效的 passkey —— 用户选了必然登录失败。
+ *
+ * 有了这个标记：
+ *   标记在 → 才去启动 passkey 流程（无点击尝试 + 条件式调解）
+ *   标记清 → 完全不沾 passkey，系统也就不会弹那把失效的凭据，用户正常输入
+ */
+const PASSKEY_FLAG_KEY = "ec_passkey_on_device";
+
+export function markPasskeyOnDevice() {
+  try {
+    localStorage.setItem(PASSKEY_FLAG_KEY, "1");
+  } catch {
+    /* 隐私模式下不可用，忽略 */
+  }
+}
+
+export function hasPasskeyOnDevice() {
+  try {
+    return localStorage.getItem(PASSKEY_FLAG_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function clearPasskeyOnDevice() {
+  try {
+    localStorage.removeItem(PASSKEY_FLAG_KEY);
+  } catch {
+    /* 忽略 */
+  }
 }
 
 /* ── 能力探测 ───────────────────────────────────────────────── */
@@ -272,38 +311,18 @@ export async function createPasskey(deviceName) {
   if (!json?.success) {
     return { ok: false, code: json?.code || "VERIFY_FAILED", message: json?.message || "" };
   }
+  markPasskeyOnDevice();
   return { ok: true };
 }
 
 /**
- * 登录页用：启动「条件式调解」（autofill）的 passkey 登录。**不需要按钮**。
+ * passkey 登录的共用流程（四种触发方式共用：立即弹、条件式调解、按钮、显式调用）。
  *
- * 为什么不能用「页面加载就弹生物识别」：WebAuthn 要求**用户手势**才能调用，
- * 平台会直接拒绝。条件式调解是平台提供的唯一无按钮方案 —— 它把 passkey 交给
- * 系统的自动填充栏（iOS 的键盘上方 / 安卓的 autofill），用户点一下账号栏就会
- * 被提示用 Face ID / 指纹登录。
- *
- * 这个 Promise 会一直挂着直到用户真的选了凭据（或中断）。
- * 不支持 / 没凭据 / 用户输密码 —— 一律静默返回，绝不干扰正常登录。
- *
- * @returns {Promise<{ok:boolean, redirect?:string, code?:string, message?:string}>}
+ * @param {'conditional'|undefined} mediation
+ *   'conditional' → 交给系统自动填充栏，用户点账号栏才出现（不需要按钮）
+ *   undefined     → 立即弹生物识别（需要用户手势，多数平台在页面加载时会拒）
  */
-export async function startConditionalPasskeyLogin({ signal } = {}) {
-  if (!webauthnSupported()) {
-    return { ok: false, code: "UNSUPPORTED" };
-  }
-
-  // 能力探测：不支持条件式调解就直接放弃（不要抛给调用方）
-  try {
-    const fn = window.PublicKeyCredential?.isConditionalMediationAvailable;
-    if (typeof fn !== "function") return { ok: false, code: "UNSUPPORTED" };
-    if ((await fn.call(window.PublicKeyCredential)) !== true) {
-      return { ok: false, code: "UNSUPPORTED" };
-    }
-  } catch {
-    return { ok: false, code: "UNSUPPORTED" };
-  }
-
+async function runPasskeyLogin({ mediation, signal } = {}) {
   const { json: opt } = await postForm("api/session/webauthn_login_options_api.php");
   if (!opt?.success) {
     return { ok: false, code: opt?.code || "OPTIONS_FAILED", message: opt?.message || "" };
@@ -312,9 +331,8 @@ export async function startConditionalPasskeyLogin({ signal } = {}) {
   let assertion = null;
   try {
     assertion = await navigator.credentials.get({
-      // 用户没选凭据时会被 abort 掉，不该当成错误上报
       signal,
-      mediation: "conditional",
+      ...(mediation ? { mediation } : {}),
       publicKey: {
         challenge: b64urlToBytes(opt.challenge),
         rpId: opt.rpId,
@@ -346,6 +364,48 @@ export async function startConditionalPasskeyLogin({ signal } = {}) {
   return { ok: true, redirect: json.redirect || "/dashboard" };
 }
 
+/**
+ * 立即尝试一次 passkey 登录 —— 用在「打开 App 就刷脸」。
+ *
+ * ⚠️ WebAuthn 要求**用户手势**，多数平台会直接拒（NotAllowedError）。
+ * 能自动弹的只有原生 App。所以调用方**必须**在失败时回退到条件式调解，
+ * 否则用户会连「点账号栏刷脸」都用不上。
+ * 平台是否放行由实测决定，这里只负责如实尝试并返回原因。
+ */
+export async function tryImmediatePasskeyLogin({ signal } = {}) {
+  if (!webauthnSupported()) {
+    return { ok: false, code: "UNSUPPORTED", message: "" };
+  }
+  return runPasskeyLogin({ signal });
+}
+
+/**
+ * 启动「条件式调解」（autofill）的 passkey 登录。**不需要按钮**。
+ *
+ * 它把 passkey 交给系统的自动填充栏（iOS 键盘上方 / 安卓 autofill），
+ * 用户点一下账号栏就会被提示用 Face ID / 指纹登录。
+ * 这个 Promise 会一直挂着直到用户真的选了凭据（或中断）。
+ *
+ * @returns {Promise<{ok:boolean, redirect?:string, code?:string, message?:string}>}
+ */
+export async function startConditionalPasskeyLogin({ signal } = {}) {
+  if (!webauthnSupported()) {
+    return { ok: false, code: "UNSUPPORTED" };
+  }
+
+  // 能力探测：不支持条件式调解就直接放弃（不要抛给调用方）
+  try {
+    const fn = window.PublicKeyCredential?.isConditionalMediationAvailable;
+    if (typeof fn !== "function") return { ok: false, code: "UNSUPPORTED" };
+    if ((await fn.call(window.PublicKeyCredential)) !== true) {
+      return { ok: false, code: "UNSUPPORTED" };
+    }
+  } catch {
+    return { ok: false, code: "UNSUPPORTED" };
+  }
+
+  return runPasskeyLogin({ mediation: "conditional", signal });
+}
 /* ── 用 passkey 登录 ────────────────────────────────────────── */
 
 /**
@@ -422,5 +482,7 @@ export async function removeAllPasskeys() {
   if (!json?.success) {
     return { ok: false, message: json?.message || "" };
   }
+  // 本地标记同步清掉：否则系统还会在自动填充栏弹出这把已失效的凭据
+  clearPasskeyOnDevice();
   return { ok: true, removed: json.removed ?? 0 };
 }

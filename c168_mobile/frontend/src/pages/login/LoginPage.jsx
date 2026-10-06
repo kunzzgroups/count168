@@ -18,11 +18,30 @@ import {
 import { registerDeviceToken } from "../../lib/deviceTokenApi.js";
 import { readLastCompanyId, writeLastCompanyId } from "../../lib/lastLoginPrefs.js";
 import {
+  hasPasskeyOnDevice,
+  passkeyErrorMessage,
   startConditionalPasskeyLogin,
-  webauthnSupported,
+  tryImmediatePasskeyLogin,
 } from "../../lib/webauthn.js";
 
 const LOGIN_ASSET_RETRY_KEY = "ec_mobile_login_asset_retry";
+
+/**
+ * 这些 passkey 错误码不是“用户需要知道的故障”，而是平台限制或用户主动放弃：
+ *   NotAllowedError —— 多数平台上等于“需要用户手势”，页面加载时调用必被拒
+ *   CANCELLED / AbortError —— 用户自己取消或导航走了
+ *   UNSUPPORTED —— 环境不支持条件式调解
+ *   NO_ASSERTION —— 没拿到断言（一般是上面几种的副作用）
+ * 遇到这些就静默回退，不要弹任何提示。
+ * 其余（尤其是 CREDENTIAL_UNKNOWN）必须告知，否则就变成“能选但登不了”。
+ */
+const SILENT_PASSKEY_CODES = new Set([
+  "NotAllowedError",
+  "CANCELLED",
+  "AbortError",
+  "UNSUPPORTED",
+  "NO_ASSERTION",
+]);
 
 /** Uppercase display via CSS; keep raw value while typing so caret stays put. */
 function useUppercaseField(initial = "") {
@@ -383,30 +402,54 @@ export default function LoginPage() {
   useAuthBackground();
 
   /**
-   * 登录页**不放任何生物识别按钮**（产品要求）。
+   * 登录页**不放任何生物识别按钮**（产品要求）。只在本设备确实注册过 passkey 时才动作。
    *
-   * 改为启动「条件式调解」：把 passkey 交给系统的自动填充栏，
-   * 用户点一下账号栏就会被提示用 Face ID / 指纹登录 —— 页面上没有任何多余控件。
+   * ⚠️ 为何必须先看 hasPasskeyOnDevice()：passkey 存在手机的钥匙串里，
+   * 服务端吐销**不会**把它从手机删掉。无标记就直接启动 passkey 流程的话，
+   * 关掉生物识别后系统仍会弹出那把已失效的凭据，用户选了必然登录失败。
    *
-   * 为什么不能“页面加载就弹生物识别”：WebAuthn 要求用户手势，平台会直接拒绕，
-   * 这一点在 iOS 和安卓浏览器上都一样。能自动弹的是**原生 APK**，
-   * 那由启动门禁（BiometricLockGate）负责，不在这里做。
-   *
-   * 不支持 / 没凭据 / 用户改用输入 —— 全部静默，绝不影响正常登录。
+   * 两步走：
+   *   ① 先试一次「立即弹」—— 平台若允许（如图形化地允许），打开 App 就能直接刷脸；
+   *   ② 被拒就回退到条件式调解 —— 点一下账号栏，系统在自动填充栏里提示刷脸。
+   *      WebAuthn 规范要求用户手势，所以 iOS 上①通常会被拒，②是实际可用路径。
    */
   useEffect(() => {
-    if (isNative()) return undefined;          // APK 走启动门禁，这里不做
-    if (!webauthnSupported()) return undefined;
+    if (isNative()) return undefined;        // APK 走启动门禁，这里不做
+    if (!hasPasskeyOnDevice()) return undefined; // 本机没注册过 → 完全不沾 passkey
 
     const ac = new AbortController();
     let cancelled = false;
     (async () => {
       try {
-        const result = await startConditionalPasskeyLogin({ signal: ac.signal });
-        if (cancelled || !result.ok) return;
-        await finishLogin(result.redirect || "/dashboard");
+        // ① 先试「立即弹」—— 平台若放行，打开 App 就直接刷脸
+        const immediate = await tryImmediatePasskeyLogin({ signal: ac.signal });
+        if (cancelled) return;
+        if (immediate.ok) {
+          await finishLogin(immediate.redirect || "/dashboard");
+          return;
+        }
+
+        const immediateCode = immediate.code || "";
+        if (immediateCode && !SILENT_PASSKEY_CODES.has(immediateCode)) {
+          // 例如 CREDENTIAL_UNKNOWN：用户确实选了一把已失效的 passkey。
+          // 必须告知，否则表现就是“弹出来了但登不了”。
+          showNotice(passkeyErrorMessage(lang, immediateCode, i18n.bioFailed));
+          return;
+        }
+
+        // ② 被平台拒（通常是要求用户手势）→ 回退到条件式调解：
+        //    用户点一下账号栏，系统在自动填充栏里提示刷脸。
+        const conditional = await startConditionalPasskeyLogin({ signal: ac.signal });
+        if (cancelled || !conditional.ok) {
+          const code = conditional.code || "";
+          if (!cancelled && code && !SILENT_PASSKEY_CODES.has(code)) {
+            showNotice(passkeyErrorMessage(lang, code, i18n.bioFailed));
+          }
+          return;
+        }
+        await finishLogin(conditional.redirect || "/dashboard");
       } catch {
-        /* 用户没选凭据 / 中断 —— 不必提示，正常输入即可 */
+        /* 任何意外都不要影响正常输入登录 */
       }
     })();
 
@@ -414,7 +457,7 @@ export default function LoginPage() {
       cancelled = true;
       ac.abort();
     };
-  }, [finishLogin]);
+  }, [finishLogin, i18n.bioFailed, lang, showNotice]);
 
   useEffect(() => {
     const ac = new AbortController();
