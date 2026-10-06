@@ -26,10 +26,10 @@ import {
 } from "../../lib/deviceTokenApi.js";
 import {
   createPasskey,
+  biometricDiagnostic,
   listPasskeys,
   passkeyErrorMessage,
   removeAllPasskeys,
-  webauthnDiagnostic,
   webauthnSupported,
 } from "../../lib/webauthn.js";
 import "./more.css";
@@ -116,6 +116,8 @@ export default function SettingsPage() {
         setBioTypeLabel(label);
         setBioSupported(label !== "");
         setBioEnabled(Boolean(storedToken));
+        // 原生分支失败时也把诊断留下 —— “被误判成原生”恰好是最难看出的一种
+        if (label === "") setBioDiag(biometricDiagnostic());
         return;
       }
 
@@ -142,7 +144,7 @@ export default function SettingsPage() {
       setBioMode("remember");
       setBioTypeLabel("");
       setBioSupported(true);
-      setBioDiag(webauthnDiagnostic());
+      setBioDiag(biometricDiagnostic());
       const remembered = await getRememberDevice();
       if (cancelled) return;
       setBioEnabled(remembered.enabled === true);
@@ -359,7 +361,7 @@ export default function SettingsPage() {
               </p>
             ) : null}
 
-            {bioMode === "remember" && bioDiag ? (
+            {bioDiag ? (
               <p className="m-more-settings-hint">{`[${bioDiag}]`}</p>
             ) : null}
 

@@ -8,6 +8,8 @@
  */
 
 import { buildApiUrl } from "../utils/apiUrl.js";
+// 仅用于诊断串（biometricDiagnostic），业务逻辑不依赖它
+import { isNative } from "./biometricStore.js";
 
 /* ── base64url ↔ ArrayBuffer（WebAuthn 全用 ArrayBuffer，接口全用 base64url）── */
 
@@ -93,6 +95,34 @@ export function passkeyErrorMessage(lang, code, fallback) {
 
 /* ── 能力探测 ───────────────────────────────────────────────── */
 
+/**
+ * 生物识别相关的完整诊断串。
+ *
+ * 为什么需要：我在本机无法测 iOS / 安卓真机，而“开关点不了”可能来自好几个
+ * 不同原因（被误判为原生、WebAuthn 缺失、非安全上下文……）。把判定依据全部摊开，
+ * 一张截图就能定位，不用再来回猜。定位完成后可以删。
+ */
+export function biometricDiagnostic() {
+  try {
+    const cap = window.Capacitor;
+    const headers = cap?.PluginHeaders;
+
+    return [
+      `native=${isNative() ? 1 : 0}`,
+      // 下面两条就是 isNative() 的判据本身 —— 能直接看出是哪一条命中的
+      `androidBridge=${typeof window.androidBridge !== "undefined" ? 1 : 0}`,
+      `pluginHeaders=${Array.isArray(headers) ? headers.length : "none"}`,
+      `plat=${typeof cap?.getPlatform === "function" ? cap.getPlatform() : "-"}`,
+      `webkitBridge=${window.webkit?.messageHandlers?.bridge ? 1 : 0}`,
+      `secure=${window.isSecureContext === true ? 1 : 0}`,
+      `pkc=${typeof window.PublicKeyCredential}`,
+      `cred=${navigator.credentials ? 1 : 0}`,
+      `standalone=${isStandaloneWebApp() ? 1 : 0}`,
+    ].join(" ");
+  } catch {
+    return "diag-error";
+  }
+}
 /** 当前环境是否支持 WebAuthn（必须是安全上下文：https 或 localhost） */
 export function webauthnSupported() {
   try {
@@ -134,23 +164,6 @@ export function isStandaloneWebApp() {
 
 /**
  * 诊断串：探测失败时带上它，一眼就能看出是哪个条件不成立。
- * 我在本机无法测 iOS，用这个换取确定性；定位到原因后可以删。
- */
-export function webauthnDiagnostic() {
-  try {
-    return [
-      `secure=${window.isSecureContext === true ? 1 : 0}`,
-      `pkc=${typeof window.PublicKeyCredential}`,
-      `cred=${navigator.credentials ? 1 : 0}`,
-      `standalone=${isStandaloneWebApp() ? 1 : 0}`,
-    ].join(" ");
-  } catch {
-    return "diag-error";
-  }
-}
-
-/**
- * 是否存在「平台验证器」（Face ID / Touch ID / 安卓指纹 / Windows Hello）。
  *
  * ⚠️ **不要拿它当显示开关/按钮的门槛。** 它在 iOS 上会给出**假阴性**：
  * 用户实际能成功注册并登录 passkey，这个探测却返回 false。
