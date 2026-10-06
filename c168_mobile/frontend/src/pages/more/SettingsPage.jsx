@@ -21,9 +21,11 @@ import {
 import { registerDeviceToken, revokeDeviceToken } from "../../lib/deviceTokenApi.js";
 import {
   createPasskey,
+  isStandaloneWebApp,
   listPasskeys,
   passkeyErrorMessage,
   removeAllPasskeys,
+  webauthnDiagnostic,
   webauthnSupported,
 } from "../../lib/webauthn.js";
 import "./more.css";
@@ -52,6 +54,9 @@ export default function SettingsPage() {
   const [bioEnabled, setBioEnabled] = useState(false);
   const [bioTypeLabel, setBioTypeLabel] = useState("");
   const [bioBusy, setBioBusy] = useState(false);
+  // 诊断串：探测失败时一并显示，用于定位到底是哪个条件不成立。
+  // 我在本机无法测 iOS，所以先靠这个换取确定性；定了因就可以删。
+  const [bioDiag, setBioDiag] = useState("");
   const [bioError, setBioError] = useState("");
   const i18n = useMemo(() => MORE_I18N[lang] || MORE_I18N.en, [lang]);
 
@@ -118,7 +123,11 @@ export default function SettingsPage() {
       setBioMode("web");
       setBioTypeLabel("");
       setBioSupported(supported);
-      if (!supported) return;
+      if (!supported) {
+        // 关键：把不成立的条件记下来，否则只能说“不支持”而无从下手
+        setBioDiag(webauthnDiagnostic());
+        return;
+      }
       const listed = await listPasskeys();
       if (cancelled) return;
       setBioEnabled((listed.count || 0) > 0);
@@ -278,7 +287,9 @@ export default function SettingsPage() {
               {!bioSupported
                 ? (bioMode === "native"
                     ? i18n.bioUnsupportedNativeHint
-                    : i18n.bioUnsupportedWebHint) || ""
+                    : isStandaloneWebApp()
+                      ? i18n.bioUnsupportedStandaloneHint
+                      : i18n.bioUnsupportedWebHint) || ""
                 : bioEnabled
                   ? // 原生才报具体的指纹/人脸类型
                     [i18n.bioEnabledHint || "", bioMode === "native" ? bioTypeLabel : ""]
@@ -286,6 +297,10 @@ export default function SettingsPage() {
                       .join(" · ")
                   : i18n.bioDisabledHint || ""}
             </p>
+
+            {!bioSupported && bioDiag ? (
+              <p className="m-more-settings-hint">{`[${bioDiag}]`}</p>
+            ) : null}
 
             {bioError ? (
               <p className="m-more-settings-hint m-more-settings-hint--error" role="alert">

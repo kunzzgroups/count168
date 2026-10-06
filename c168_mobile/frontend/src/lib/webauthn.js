@@ -99,12 +99,53 @@ export function webauthnSupported() {
     return (
       typeof window !== "undefined" &&
       window.isSecureContext === true &&
-      typeof window.PublicKeyCredential === "function" &&
+      // 用 != null 而不是 typeof === "function"：
+      // 不同 WebKit 版本对 PublicKeyCredential 的暴露形式不完全一致，
+      // 只要它存在就给它一次机会，真不行的话尝试时会报具体错误。
+      window.PublicKeyCredential != null &&
       typeof navigator !== "undefined" &&
       !!navigator.credentials
     );
   } catch {
     return false;
+  }
+}
+
+/**
+ * 是否从「添加到主屏幕」的独立 Web App 打开。
+ *
+ * 为什么要单独判：iOS 的独立 Web App（standalone）里 passkey 支持不完整甚至没有，
+ * 而用户在那种状态下只会看到“不支持”而不知道该怎么办。识别出来后可以
+ * 直接告诉他改用 Safari。
+ */
+export function isStandaloneWebApp() {
+  try {
+    return (
+      (typeof window !== "undefined" &&
+        typeof window.matchMedia === "function" &&
+        window.matchMedia("(display-mode: standalone)").matches === true) ||
+      // iOS Safari 自己的字段
+      (typeof navigator !== "undefined" && navigator.standalone === true)
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 诊断串：探测失败时带上它，一眼就能看出是哪个条件不成立。
+ * 我在本机无法测 iOS，用这个换取确定性；定位到原因后可以删。
+ */
+export function webauthnDiagnostic() {
+  try {
+    return [
+      `secure=${window.isSecureContext === true ? 1 : 0}`,
+      `pkc=${typeof window.PublicKeyCredential}`,
+      `cred=${navigator.credentials ? 1 : 0}`,
+      `standalone=${isStandaloneWebApp() ? 1 : 0}`,
+    ].join(" ");
+  } catch {
+    return "diag-error";
   }
 }
 

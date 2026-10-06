@@ -9,8 +9,10 @@ export const MORE_I18N = {
     bioUnsupported: "Not supported here",
     bioUnsupportedNativeHint:
       "No fingerprint or face is available on this device. Enrol biometrics in your phone settings first.",
+    bioUnsupportedStandaloneHint:
+      "You opened this from a home-screen app. iOS does not support passkeys there — please open this page in Safari.",
     bioUnsupportedWebHint:
-      "This browser cannot use passkey sign-in. On iPhone this needs Safari 16+, and it does not work from a home-screen app — open the site in Safari instead.",
+      "This browser cannot use passkey sign-in. On iPhone this needs Safari 16 or newer.",
     bioEnabledHint: "Signs you in with Face ID or your fingerprint",
     bioDisabledHint:
       "Turn on to sign in with Face ID or your fingerprint instead of typing the password.",
@@ -47,6 +49,10 @@ export const MORE_I18N = {
     bioUnsupported: "此环境不支持",
     bioUnsupportedNativeHint:
       "这台设备没有可用的指纹 / 人脸。安卓 App 需要先在系统里录入生物识别。",
+    bioUnsupportedStandaloneHint:
+      "你是从「添加到主屏幕」打开的吧？iOS 的独立 App 里不支持 passkey，请用 Safari 打开本页。",
+    bioUnsupportedWebHint:
+      "此浏览器不支持 passkey 登录。iPhone 需要 Safari 16 以上。",
     bioUnsupportedWebHint:
       "此浏览器不支持 passkey 登录。iPhone 需要 Safari 16 以上；若是从「添加到主屏幕」打开，请改用 Safari。",
     bioEnabledHint: "用指纹 / 人脸直接登录",
