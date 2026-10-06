@@ -106,24 +106,15 @@ export default function SettingsPage() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      // ① **先判 WebAuthn**。它的可用性与 isNative() 无关，而且必须先判：
-      //    合并成一栏之后如果先走 isNative()，一旦平台判断误报（iOS 的 WebKit
-      //    就会把网页当成 iOS 原生壳），passkey 入口会**整个消失** ——
-      //    这正是“之前能加 passkey、合并后不能”的原因。
-      if (webauthnSupported()) {
-        setBioMode("passkey");
-        setBioTypeLabel("");
-        setBioSupported(true);
-        const listed = await listPasskeys();
-        if (cancelled) return;
-        setBioCount(listed.count || 0);
-        setBioEnabled((listed.count || 0) > 0);
-        return;
-      }
-
-      // ② 原生：**必须插件真的应答**才算原生。
-      //    只信 isNative() 的话，平台误报会把网页环境带进原生分支，
-      //    然后显示“设备没有指纹/人脸”（与实际不符）。
+      // ① **原生优先**。
+      //
+      // 为何原生必须排在最前：安卓 WebView **也暴露 WebAuthn API**
+      // （isSecureContext + PublicKeyCredential + navigator.credentials 都为真），
+      // 所以把 WebAuthn 摆在前面会让 APK 走进 passkey 分支 ——
+      // 而 passkey 在 WebView 里实际注册不了，表现就是“安卓开启生物识别总是失败”。
+      // （之前把 WebAuthn 提前是为了绕开 isNative() 在 iOS 上的误判；
+      //   那个误判已经在 isNative() 里修掉了 —— 现在只认 androidBridge
+      //   或 Capacitor.PluginHeaders —— 所以原生优先是安全的。）
       if (isNative()) {
         const [label, storedToken] = await Promise.all([describeBiometry(), loadToken()]);
         if (cancelled) return;
@@ -138,20 +129,32 @@ export default function SettingsPage() {
         const report = await biometryReport();
         if (cancelled) return;
         setBioUnavailableReason(report);
-        // 插件不应答 → 不当原生处理，往下走（至少还有免登录可用）
+        // ⚠️ 必须就地返回，**绝不能落到下面的 WebAuthn 分支**：
+        // 安卓 WebView 会谎报 WebAuthn 可用，落下去又会变成
+        // “安卓一开启就失败”。原生环境就用原生机制，不行就是不行。
+        setBioMode("native");
+        setBioTypeLabel("");
+        setBioSupported(false);
+        return;
       }
 
-      // ③ 没有 WebAuthn（也没有可用的原生插件）→ 开关置灰。
+      // ② 网页端：有 WebAuthn 就走 passkey
+      if (webauthnSupported()) {
+        setBioMode("passkey");
+        setBioTypeLabel("");
+        setBioSupported(true);
+        const listed = await listPasskeys();
+        if (cancelled) return;
+        setBioCount(listed.count || 0);
+        setBioEnabled((listed.count || 0) > 0);
+        return;
+      }
+
+      // ③ 什么都不能用（原生插件无应答，且没有 WebAuthn）→ 开关置灰。
       //    产品明确不要「30 天免登录」这种替代品，所以不再降级为别的功能。
       setBioMode("none");
       setBioTypeLabel("");
       setBioSupported(false);
-      try {
-        // eslint-disable-next-line no-console
-        console.warn("[biometric] unavailable:", biometricDiagnostic());
-      } catch {
-        /* console 不可用就算了 */
-      }
     })();
     return () => {
       cancelled = true;
