@@ -7,8 +7,8 @@
 # 由 deploy.sh（count168.site）与 deploy-org.sh（count168.org）调用，也可手动跑：
 #   APP_ROOT=/var/www/count168.org bash deploy/publish-app-page.sh
 #
-# APK 不进 git（c168_mobile/app/*.apk 已 gitignore）：
-#   已存在则保留；缺失时优先从同机 count168.site 的 /app/ 借一份，避免重复上传约 6MB。
+# APK 不进 git（c168_mobile/app/*.apk 已 gitignore）：本脚本只发布页面文件，**绝不复制或借用 APK**
+#   ——跨域名复制会让用户看到别家的数据。该域名的 APK 单独上传，缺失时下面只会 WARN。
 set -euo pipefail
 
 APP_ROOT="${APP_ROOT:-/var/www/count168}"
