@@ -145,17 +145,21 @@ export function getDeviceName() {
  */
 export async function authenticate() {
   const lang = readLoginLang();
-  const reason =
-    lang === "zh"
-      ? "验证指纹以登录 EazyCount"
-      : "Verify your fingerprint to sign in to EazyCount";
+  // 文案尽量短：系统弹窗本来就在上方显示应用名，
+  // 再写一遍 “to EazyCount” 只会多折一行，让弹窗看起来拥挤。
+  const reason = lang === "zh" ? "验证指纹以登录" : "Verify your fingerprint to sign in";
 
   await BiometricAuth.authenticate({
     reason,
+    // 空字符串 = 不要标题行。默认值是 “Fingerprint Authentication” 这类名称，
+    // 与系统已经显示的应用名 + 上面的 reason 重复，是第三行冗余文字。
+    androidTitle: "",
     cancelTitle: lang === "zh" ? "取消" : "Cancel",
     // 不允许用锁屏密码兜底：这里要的是「生物识别」本身，
     // 允许设备凭据会让「指纹解锁」名不副实。
     allowDeviceCredential: false,
+    // 仍然**不传** androidSubtitle：它与 reason 是两个不同的显示位置，
+    // 传同一个字符串会上下显示两遍（见文件顶部说明）。
   });
 }
 

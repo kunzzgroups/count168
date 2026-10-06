@@ -4,10 +4,19 @@
   position: fixed;
   inset: 0;
   z-index: 9999;
+  /*
+   * 列向 + 卡片 margin:auto 是「能居中、溢出不裁切」的可靠写法。
+   * 不能用 align-items:center 居中：视口一矮（小屏 / 大字体 / 键盘弹出）
+   * 卡片会向上下**两头同时溢出**，而顶部部分是滚不到的，会被永久裁掉。
+   * margin:auto 在空间足够时居中、不够时归零 → 从顶部开始且可滚动。
+   */
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
+  gap: 0;
   padding: 24px;
+  overflow-y: auto;
   background: #f4f7fc;
   overscroll-behavior: none;
 }
@@ -24,6 +33,7 @@
   z-index: 1;
   width: 100%;
   max-width: 340px;
+  margin: auto;   /* 见 .bio-lock 的说明 */
   display: flex;
   flex-direction: column;
   align-items: center;
