@@ -61,6 +61,16 @@ export default function SettingsPage() {
   // 仅“原生不可用”时填：APK 关了 web 调试拿不到 console，靠界面一行字诊断
   const [bioUnavailableReason, setBioUnavailableReason] = useState("");
   const [bioError, setBioError] = useState("");
+  /**
+   * ⚠️ 临时诊断：**每次改动必须递增这个号**。
+   *
+   * 为何需要它：iOS 主屏幕应用 / 安卓 WebView 会把 JS 留在内存里，
+   * 从后台切回来不会重新加载 —— 于是“改了代码设备上却一模一样”。
+   * 用户截图里的这个号能直接确定设备跑的是哪个包。
+   * 功能稳定后连同下面那行一起删。
+   */
+  const BIO_BUILD = "b7";
+  const [bioDiag, setBioDiag] = useState("");
   const i18n = useMemo(() => MORE_I18N[lang] || MORE_I18N.en, [lang]);
 
   const setLang = useCallback((next) => {
@@ -123,7 +133,12 @@ export default function SettingsPage() {
         setBioSupported(true);
         setBioEnabled(Boolean(storedToken));
         // 探测无应答时只记一行诊断，不影响开关可用性
-        if (label === "") setBioUnavailableReason(await biometryReport());
+        const report = label === "" ? await biometryReport() : "";
+        if (cancelled) return;
+        if (report) setBioUnavailableReason(report);
+        setBioDiag(
+          `native=1 mode=native label="${label}" token=${storedToken ? "yes" : "no"} probe=${report || "ok"}`,
+        );
         return;
       }
 
@@ -141,14 +156,16 @@ export default function SettingsPage() {
         if (cancelled) return;
         setBioCount(listed.count || 0);
         setBioEnabled((listed.count || 0) > 0);
+        setBioDiag(`native=0 mode=passkey count=${listed.count || 0} wk=1`);
         return;
       }
 
-      // ③ 什么都不能用（原生插件无应答，且没有 WebAuthn）→ 开关置灰。
+      // ③ 什么都不能用 → 开关置灰。
       //    产品明确不要「30 天免登录」这种替代品，所以不再降级为别的功能。
       setBioMode("none");
       setBioTypeLabel("");
       setBioSupported(false);
+      setBioDiag(`native=0 mode=none wk=0`);
     })();
     return () => {
       cancelled = true;
@@ -161,6 +178,7 @@ export default function SettingsPage() {
       const enable = next === undefined ? !bioEnabled : Boolean(next);
       setBioBusy(true);
       setBioError("");
+      setBioDiag(`mode=${bioMode} tap=${enable ? "on" : "off"} …`);
       try {
         if (bioMode === "passkey") {
           if (enable) {
@@ -169,18 +187,21 @@ export default function SettingsPage() {
               // 不再把 NotAllowedError 当成“用户取消”而静默吞掉：
               // 它同时也是“没有用户手势 / 超时 / 策略不允许”的代码。
               setBioError(passkeyErrorMessage(lang, created.code, i18n.bioEnableFailed));
+              setBioDiag(`mode=passkey tap=on FAIL code=${created.code}`);
               return;
             }
           } else {
             const removed = await removeAllPasskeys();
             if (!removed.ok) {
               setBioError(removed.message || i18n.bioEnableFailed || "Could not turn off.");
+              setBioDiag(`mode=passkey tap=off FAIL ${removed.message || ""}`);
               return;
             }
           }
           const listed = await listPasskeys();
           setBioCount(listed.count || 0);
           setBioEnabled((listed.count || 0) > 0);
+          setBioDiag(`mode=passkey tap=${enable ? "on" : "off"} OK count=${listed.count || 0}`);
           return;
         }
 
@@ -190,6 +211,7 @@ export default function SettingsPage() {
           await revokeDeviceToken({ deviceId: getDeviceId() });
           await clearToken();
           setBioEnabled(false);
+          setBioDiag("mode=native tap=off OK");
           return;
         }
 
@@ -203,12 +225,15 @@ export default function SettingsPage() {
               ? i18n.bioDeviceLimit || "Too many devices."
               : i18n.bioEnableFailed || "Could not enable biometric unlock.",
           );
+          setBioDiag(`mode=native tap=on FAIL code=${issued.code || "?"}`);
           return;
         }
         await saveToken(issued.token);
         setBioEnabled(true);
-      } catch {
+        setBioDiag(`mode=native tap=on OK token=${issued.token ? "saved" : "MISSING"}`);
+      } catch (err) {
         setBioError(i18n.bioEnableFailed || "Could not enable biometric unlock.");
+        setBioDiag(`mode=${bioMode} tap=${enable ? "on" : "off"} THREW ${err?.message || err}`);
       } finally {
         setBioBusy(false);
       }
@@ -308,8 +333,15 @@ export default function SettingsPage() {
               )}
             </div>
 
-            {/* 可用时一行字都不显示；不可用时必须给一行原因，否则就是个沉默的死开关 */}
-            {!bioSupported && bioUnavailableReason ? (
+            {/* 诊断行：本次排查专用，只在有内容时显示（功能稳下来后连同 BIO_BUILD 一起删） */}
+            {bioDiag ? (
+              <p className="m-more-settings-hint">{`[${BIO_BUILD}] ${bioDiag}`}</p>
+            ) : null}
+
+            {/* 不可用时给一行原因。
+                注意：条件里**不能**再带 !bioSupported —— 带上之后只要 bioSupported
+                为 true，这条原因就被自己藏掉了，出问题时什么都看不到。 */}
+            {bioUnavailableReason ? (
               <p className="m-more-settings-hint">{`[${bioUnavailableReason}]`}</p>
             ) : null}
 
