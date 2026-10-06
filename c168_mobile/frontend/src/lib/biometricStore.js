@@ -27,23 +27,28 @@ import { readLoginLang } from "./loginLang.js";
  * 安全存储的 key 前缀，必须与其它插件隔离。
  * 绝不能留空 —— 空前缀会清掉整个 App 的安全存储（含其它插件的数据）。
  */
-const KEY_PREFIX = "count168_biometric_";
-const TOKEN_KEY = "device_token";
-const DEVICE_ID_KEY = "device_id";
+/**
+ * 存储键。
+ *
+ * ⚠️ 名字前缀直接烤进**键名**，而不是用 SecureStorage.setKeyPrefix()。
+ *
+ * 为何改成这样：setKeyPrefix 会改插件的**全局可变状态**，而 set / get / remove
+ * 都要先 await 它。一旦它失败（或调用时序不一致），就会**用不同前缀存取同一个键**
+ * —— 存进去的取不出来。
+ * 实机上报过“登录页已开启指纹，但设置里 Biometric Unlock 显示关闭”。
+ * 用带命名空间的键名能达到同样的隔离效果，而且没有全局状态依赖。
+ */
+const TOKEN_KEY = "count168_biometric_device_token";
+const DEVICE_ID_KEY = "count168_biometric_device_id";
 
 /** 明文 device_id 不敏感，放 localStorage 即可；令牌绝不能放这里。 */
 const DEVICE_ID_LS_KEY = "ec_biometric_device_id";
 
-let prefixReady = null;
-
+/** 是否已经设置过安全存储的命名空间（已废弃，仅为兼容保留空实现） */
 function ensurePrefix() {
-  if (!prefixReady) {
-    prefixReady = SecureStorage.setKeyPrefix(KEY_PREFIX).catch(() => {
-      // 设不上就别继续，否则后续读写落在一个没隔离的前缀里
-      prefixReady = null;
-    });
-  }
-  return prefixReady;
+  // 已废弃：不再用 setKeyPrefix（见 TOKEN_KEY 的注释）。
+  // 保留空实现以避免触及调用点导致漏改。
+  return Promise.resolve();
 }
 
 /** 是否跑在 Capacitor 原生壳（APK）里。网页 / PWA 一律 false。 */
@@ -194,8 +199,15 @@ export async function loadToken() {
   if (!isNative()) return null;
   try {
     await ensurePrefix();
-    const value = await SecureStorage.get(TOKEN_KEY);
-    return typeof value === "string" && value.length === 64 ? value : null;
+    const value = await withTimeout(SecureStorage.get(TOKEN_KEY), 4000);
+    if (typeof value !== "string" || value === "") return null;
+
+    // 宽容提取：不要求长度恰好 64。
+    // 有些实现会把值包一层（JSON 引号、前缀拼接），严格长度校验会把
+    // 一把**本来可用**的令牌当成“没有凭据”丢掉 —— 那就是设置里
+    // 明明已开启却显示 Off 的原因。只要里面能取出一段 64 位 hex 就用它。
+    const match = value.match(/[0-9a-f]{64}/i);
+    return match ? match[0].toLowerCase() : null;
   } catch {
     // 指纹变更 / 改锁屏密码 / 重装 / 恢复备份 → Keystore 密钥失效，这里会抛
     return null;
