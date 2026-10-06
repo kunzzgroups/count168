@@ -35,3 +35,17 @@ export function writeLastCompanyId(companyId) {
     /* 写不进去就算了，不影响登录 */
   }
 }
+
+/**
+ * 清除记住的公司 ID。
+ *
+ * 产品要求：**退出登录时清掉**。代价是下次登录要重新输公司 ID ——
+ * 这是明确选择的结果（共用设备上不想让下一个人看到上一个账号的公司 ID）。
+ */
+export function clearLastCompanyId() {
+  try {
+    localStorage.removeItem(COMPANY_KEY);
+  } catch {
+    /* 忽略 */
+  }
+}

@@ -7,6 +7,7 @@ import MobileThemeSwitch from "../../components/layout/MobileThemeSwitch.jsx";
 import MobileOnOffSwitch from "../../components/layout/MobileOnOffSwitch.jsx";
 import { fetchJson } from "../../lib/fetchJson.js";
 import { useSyncedLoginLang, writeLoginLang } from "../../lib/loginLang.js";
+import { clearLastCompanyId } from "../../lib/lastLoginPrefs.js";
 import { readLoginTheme, writeLoginTheme } from "../../lib/loginTheme.js";
 import { MORE_I18N } from "../../translateFile/moreTranslate.js";
 import { buildApiUrl } from "../../utils/apiUrl.js";
@@ -92,6 +93,8 @@ export default function SettingsPage() {
     try {
       await fetchJson(buildApiUrl("api/session/logout_api.php"), { method: "POST" });
     } finally {
+      // 产品要求：退出登录时清掉记住的公司 ID（下次登录需重新输入）
+      clearLastCompanyId();
       navigate("/login", { replace: true });
     }
   }, [navigate]);

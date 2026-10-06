@@ -19,7 +19,6 @@ import { registerDeviceToken } from "../../lib/deviceTokenApi.js";
 import { readLastCompanyId, writeLastCompanyId } from "../../lib/lastLoginPrefs.js";
 import {
   getPasskeyId,
-  hasPasskeyOnDevice,
   passkeyErrorMessage,
   startConditionalPasskeyLogin,
   tryImmediatePasskeyLogin,
@@ -403,50 +402,50 @@ export default function LoginPage() {
   useAuthBackground();
 
   /**
-   * 登录页**不放任何生物识别按钮**（产品要求）。只在本设备确实注册过 passkey 时才动作。
+   * 登录页**不放任何生物识别按钮**（产品要求）。
    *
-   * ⚠️ 为何必须先看 hasPasskeyOnDevice()：passkey 存在手机的钥匙串里，
-   * 服务端吐销**不会**把它从手机删掉。无标记就直接启动 passkey 流程的话，
-   * 关掉生物识别后系统仍会弹出那把已失效的凭据，用户选了必然登录失败。
+   * ⚠️ 前提是**知道本机那把凭据的 ID**（getPasskeyId），而不是“注册过”。
+   * 为何这么严：传空 allowCredentials 调 get() 时，iOS 会落到「外部安全密钥（NFC）」
+   * 那条路 —— 实机上点一下输入框就弹 “Use Security Key / Too many NFC devices found”。
+   * 拿不到 ID 就不发这个请求，NFC 画面就不会再出现。
    *
    * 两步走：
-   *   ① 先试一次「立即弹」—— 平台若允许（如图形化地允许），打开 App 就能直接刷脸；
-   *   ② 被拒就回退到条件式调解 —— 点一下账号栏，系统在自动填充栏里提示刷脸。
-   *      WebAuthn 规范要求用户手势，所以 iOS 上①通常会被拒，②是实际可用路径。
+   *   ① 先试一次「立即弹」—— 已知具体凭据时 iOS 会走 Face ID，
+   *      所以打开 App 就有机会直接刷脸（实机已验证过 iOS 会弹系统界面，不要求手势）；
+   *   ② 不行就回退到条件式调解 —— 点一下账号栏，系统在自动填充栏里提示刷脸。
    */
   useEffect(() => {
     if (isNative()) return undefined;        // APK 走启动门禁，这里不做
-    if (!hasPasskeyOnDevice()) return undefined; // 本机没注册过 → 完全不沾 passkey
+
+    // ⚠️ 前提是**知道本机那把凭据的 ID**，而不是“注册过”。
+    //
+    // 为什么：传空 allowCredentials 调 get() 时，iOS 会落到「外部安全密钥（NFC）」
+    // 那条路 —— 实机上点一下输入框就弹 “Use Security Key / Too many NFC devices found”。
+    // 只知道“注册过”但拿不到 ID，就会退化成空数组 → 又弹 NFC。
+    // 所以拿不到 ID 就**完全不发这个请求**，NFC 画面就不会再出现。
+    const credentialId = getPasskeyId();
+    if (!credentialId) return undefined;
 
     const ac = new AbortController();
     let cancelled = false;
     (async () => {
       try {
-        // ① 只有**知道本机凭据 ID** 时才试「立即弹」。
-        //
-        // 为什么加这个条件：传空 allowCredentials 调 get() 时，iOS 可能落到
-        // 「外部安全密钥（NFC）」那条路 —— 实机上弹过
-        // “Use Security Key / Too many NFC devices found”，而且每次打开 App 都弹。
-        // 宁可不试，也不要弹一个令人困惑的系统界面。
-        // （没存过 ID 的老凭据会在首次成功登录后自动补上，见 runPasskeyLogin）
-        if (getPasskeyId()) {
-          const immediate = await tryImmediatePasskeyLogin({ signal: ac.signal });
-          if (cancelled) return;
-          if (immediate.ok) {
-            await finishLogin(immediate.redirect || "/dashboard");
-            return;
-          }
-
-          const immediateCode = immediate.code || "";
-          if (immediateCode && !SILENT_PASSKEY_CODES.has(immediateCode)) {
-            // 例如 CREDENTIAL_UNKNOWN：用户确实选了一把已失效的 passkey。
-            // 必须告知，否则表现就是“弹出来了但登不了”。
-            showNotice(passkeyErrorMessage(lang, immediateCode, i18n.bioFailed));
-            return;
-          }
+        // ① 先试「立即弹」—— 已知具体凭据时，iOS 应走 Face ID 而不是 NFC
+        const immediate = await tryImmediatePasskeyLogin({ signal: ac.signal });
+        if (cancelled) return;
+        if (immediate.ok) {
+          await finishLogin(immediate.redirect || "/dashboard");
+          return;
         }
 
-        // ② 回退到条件式调解：用户点一下账号栏，系统在自动填充栏里提示刷脸。
+        const immediateCode = immediate.code || "";
+        if (immediateCode && !SILENT_PASSKEY_CODES.has(immediateCode)) {
+          // 例如 CREDENTIAL_UNKNOWN：用户确实选了一把已失效的 passkey。
+          showNotice(passkeyErrorMessage(lang, immediateCode, i18n.bioFailed));
+          return;
+        }
+
+        // ② 回退到条件式调解：点一下账号栏，系统在自动填充栏里提示刷脸
         const conditional = await startConditionalPasskeyLogin({ signal: ac.signal });
         if (cancelled || !conditional.ok) {
           const code = conditional.code || "";
