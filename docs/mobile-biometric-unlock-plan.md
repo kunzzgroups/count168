@@ -558,6 +558,63 @@ app-debug.apk  9.95 MB
 
 ---
 
+### 5.10 C 阶段：owner / member 的网页「记住我」（已完成并生产验证）
+
+#### 起因：一个被漏掉的缺口
+
+调研时发现（§2.1）：现有 `remember_token` 只对 `user` 表有效。
+- **owner**：`login_api.php` 的 owner 分支是**空壳** —— `if ($remember_me) { /* 只有注释 */ }`
+- **member**：`account` 表根本没 `remember_token` 列，而且前端连字段都不发
+
+后果：iPhone / 桌面上的 **owner 每小时都要重新输一次密码**（session 1 小时空闲超时）。
+
+#### 做法：复用 `device_token`，以 `kind` 区分两种凭据
+
+没有新增两个 `remember_token` 列（那意味着第三个「手搭会话」分支 + 又一次三方身份发散），
+而是给 `device_token` 加一列：
+
+| kind | 用途 | 有效期 | 设备绑定 |
+|---|---|---|---|
+| `biometric` | 手机 App 指纹解锁 | 90 天 | 绑 `device_id` |
+| `web` | 网页端记住我 | 30 天 | 绑 `ec_web_device` cookie |
+
+复用了已有的：哈希存储、吐销、会话快照、三分支身份还原、改密码联动吐销。
+
+**为什么网页端也要一个 device_id**：`uk_device` 是 `(user_type,user_id,device_id)`。
+用随机 id 会堆行；用固定值则**不同浏览器互相覆盖** —— 那正是 `user.remember_token` 单列的老毛病。
+per-browser 稳定 id（`ec_web_device` cookie，400 天）是唯一合适的选择，顺带修了多浏览器互踢。
+
+#### 配额隔离（必须）
+
+`kind='biometric'` 与 `kind='web'` **各自计数**。否则用户在几个浏览器勾了记住我，
+就会占掉手机的 5 台指纹上限，导致再也开不了指纹解锁。
+
+#### 两个旧路径陷阱（都已处理）
+
+1. `current_user_api.php` 原本在查不到 `user` 时就**清 cookie** —— 那样 owner/member 的回退
+   就永远拿不到 cookie。已改为**两个机制都失败才清**。
+2. `logout_api.php` 不看 `user_type` 就直接 `UPDATE user ... WHERE id = $user_id`，
+   而 owner/member 会话的 `user_id` 是 owner/account 表的 id → **会误清同号 staff 用户的记住我**。已加 `user_type` 守卫。
+
+#### 生产验证（已真实发生）
+
+部署后查生产库，**表里已经有真实用户数据**，且 `last_used_at` 非空 ——
+该字段只在 `device_login_api.php` 成功换到会话时写入，所以：
+
+| 验证项 | 结果 |
+|---|---|
+| 指纹解锁**真的成功解锁过** | ✓（`last_used_at = 11:34:55`） |
+| 同账号两台设备并存、未互踢 | ✓（id=1 / id=3 均 `revoked=no`） |
+| 生产 schema 含 `kind` + `idx_kind_user` | ✓ |
+| 快照**不含** `secondary_password_verified` | ✓ 安全底线成立 |
+| 快照**不含** `last_activity` / `password_fingerprint` | ✓ |
+| 快照含数组键 `assigned_group_codes` / `assigned_company_ids` | ✓ 印证「不要只存标量白名单」的决定 |
+
+回归测试：`scripts/test-device-token.php` **142 项断言全绿**（新增 kind 隔离、无绑定解析、
+精确吐销、cookie 恢复、C168 过期豁免等）。
+
+---
+
 ## 6. 安全清单
 
 - ✅ 令牌明文**只在签发响应里出现一次**，服务端只存 `sha256`
