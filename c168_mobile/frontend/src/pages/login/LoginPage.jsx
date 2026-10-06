@@ -13,7 +13,9 @@ import {
   isAvailable as biometricAvailable,
   isNative,
   loadToken,
+  readBioOptOut,
   saveToken,
+  writeBioOptOut,
 } from "../../lib/biometricStore.js";
 import { registerDeviceToken } from "../../lib/deviceTokenApi.js";
 import { readLastCompanyId, writeLastCompanyId } from "../../lib/lastLoginPrefs.js";
@@ -345,7 +347,14 @@ export default function LoginPage() {
   const finishLogin = useCallback(
     async (targetPath) => {
       try {
-        if (isNative() && (await biometricAvailable()) && !(await loadToken())) {
+        // 已经拒绝过就不弹。少了这个条件，只要本地没令牌就每次登录都问，
+        // 用户点过「暂不开启」、或在设置里主动关掉过，都还会被反复追问。
+        if (
+          isNative() &&
+          !readBioOptOut() &&
+          (await biometricAvailable()) &&
+          !(await loadToken())
+        ) {
           setEnroll({ open: true, targetPath, busy: false, error: "" });
           return;
         }
@@ -362,6 +371,8 @@ export default function LoginPage() {
     async (enable) => {
       const targetPath = enroll.targetPath || "/dashboard";
       if (!enable) {
+        // 「暂不开启」要记住 —— 否则下次登录又问一遍
+        writeBioOptOut();
         setEnroll({ open: false, targetPath: "", busy: false, error: "" });
         navigate(targetPath, { replace: true });
         return;

@@ -200,6 +200,44 @@ export function writeModalityPref(value) {
 }
 
 /**
+ * 用户是否已经拒绝过「开启生物识别」引导。
+ *
+ * 为何需要它：登录成功后的那个引导原来**没有任何记忆**，
+ * 只要本地没有令牌就每次都弹。后果：
+ *   · 点「暂不开启」后，下次密码登录又被问一遍；
+ *   · **在设置里主动关掉开关后也会被问**（关掉会清掉本地令牌），
+ *     等于用户明确拒绝之后 App 还反复追问。
+ *
+ * 拒绝是持久的；想重新开启的用户自己会去「设置」，那里这一行一直在。
+ */
+const OPT_OUT_KEY = "ec_bio_prompt_optout";
+
+export function readBioOptOut() {
+  try {
+    return window.localStorage.getItem(OPT_OUT_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function writeBioOptOut() {
+  try {
+    window.localStorage.setItem(OPT_OUT_KEY, "1");
+  } catch {
+    /* 忽略 */
+  }
+}
+
+/** 用户在设置里重新开启时调用，把拒绝状态撤掉 */
+export function clearBioOptOut() {
+  try {
+    window.localStorage.removeItem(OPT_OUT_KEY);
+  } catch {
+    /* 忽略 */
+  }
+}
+
+/**
  * 这台设备具备哪些生物识别硬件 / 到底可不可用。
  *
  * 返回值故意分成 ok / why：以前只用一个字符串，“超时”和“系统说没有”

@@ -13,6 +13,7 @@ import { MORE_I18N } from "../../translateFile/moreTranslate.js";
 import { buildApiUrl } from "../../utils/apiUrl.js";
 import {
   biometryInfo,
+  clearBioOptOut,
   clearToken,
   describeBiometry,
   getDeviceId,
@@ -22,6 +23,7 @@ import {
   readModalityPref,
   saveToken,
   withTimeout,
+  writeBioOptOut,
   writeModalityPref,
 } from "../../lib/biometricStore.js";
 import { registerDeviceToken, revokeDeviceToken } from "../../lib/deviceTokenApi.js";
@@ -74,7 +76,7 @@ export default function SettingsPage() {
    *
    * 初始值故意非空：如果连这一行都不显示，那就不是探测失败而是**包没更新**。
    */
-  const BIO_BUILD = "b12";
+  const BIO_BUILD = "b13";
   const [bioDiag, setBioDiag] = useState("boot");
   const i18n = useMemo(() => MORE_I18N[lang] || MORE_I18N.en, [lang]);
 
@@ -254,6 +256,9 @@ export default function SettingsPage() {
           // 关闭：先吐销服务端令牌，再清本地 Keystore
           await revokeDeviceToken({ deviceId: getDeviceId() });
           await clearToken();
+          // 主动关掉 = 明确的拒绝 → 登录页的引导也不该再弹。
+          // （不记下来的话，关掉之后每次登录都会被问 —— 已经出过这个问题。）
+          writeBioOptOut();
           setBioEnabled(false);
           setBioDiag("mode=native tap=off OK");
           return;
@@ -273,6 +278,8 @@ export default function SettingsPage() {
           return;
         }
         await saveToken(issued.token);
+        // 重新开启 → 撕掉之前的拒绝标记
+        clearBioOptOut();
         setBioEnabled(true);
         setBioDiag(`mode=native tap=on OK token=${issued.token ? "saved" : "MISSING"}`);
       } catch (err) {
