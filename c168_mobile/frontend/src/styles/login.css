@@ -601,6 +601,38 @@ button.sc-login-lang-seg.active {
 .sc-login-modal-actions {
   display: flex;
   justify-content: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+/*
+ * 两个动作时纵向堆叠。
+ * 并排会让「Enable / Not now」挤成一团 —— 而且 .sc-login-btn（非 primary）
+ * 本来就没有背景与边框，看上去根本不像是按钮。
+ */
+.sc-login-modal-actions--stack {
+  flex-direction: column;
+  width: 100%;
+}
+
+.sc-login-modal-actions--stack .sc-login-btn {
+  width: 100%;
+}
+
+/* 次要动作：描边，让它看起来是可点的 */
+.sc-login-btn--ghost {
+  min-height: 48px;
+  padding: 12px 24px;
+  border: 1px solid rgba(13, 96, 255, 0.35);
+  border-radius: var(--login-radius-pill, 999px);
+  background: transparent;
+  color: var(--m-color-primary-soft-text, #1d4ed8);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.sc-login-btn--ghost:hover {
+  background: rgba(13, 96, 255, 0.06);
 }
 
 .sc-login-btn-primary {

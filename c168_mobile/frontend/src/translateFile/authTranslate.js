@@ -98,7 +98,7 @@ export const LOGIN_I18N = {
     unknownError: "Unknown error",
     bioTitle: "Biometric Unlock",
     bioBody:
-      "Unlock EazyCount with your fingerprint or face instead of typing the password next time.",
+      "Unlock EazyCount with your fingerprint or face instead of typing the password next time. You can turn it off in Settings anytime.",
     bioEnable: "Enable",
     bioLater: "Not now",
     bioEnableFailed: "Could not enable biometric unlock.",
@@ -130,7 +130,7 @@ export const LOGIN_I18N = {
     maintenanceLabel: "系统维护中:",
     unknownError: "未知错误",
     bioTitle: "生物识别解锁",
-    bioBody: "下次打开 EazyCount 用指纹 / 人脸直接进入，不用再输密码。",
+    bioBody: "下次打开 EazyCount 用指纹 / 人脸直接进入，不用再输密码。之后可随时在「设置」里关闭。",
     bioEnable: "开启",
     bioLater: "暂不开启",
     bioEnableFailed: "开启生物识别解锁失败。",

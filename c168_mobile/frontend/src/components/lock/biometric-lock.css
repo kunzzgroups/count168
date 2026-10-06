@@ -89,8 +89,14 @@
 }
 
 .bio-lock__btn--ghost {
+  /* 描边：否则“用密码登录”就是一行裸文字，看不出可以点 */
+  border: 1px solid rgba(13, 96, 255, 0.35);
   background: transparent;
   color: var(--m-color-primary-soft-text, #1d4ed8);
+}
+
+.bio-lock__btn--ghost:hover {
+  background: rgba(13, 96, 255, 0.06);
 }
 
 @media (prefers-reduced-motion: no-preference) {

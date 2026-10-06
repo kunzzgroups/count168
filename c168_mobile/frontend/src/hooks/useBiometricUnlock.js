@@ -35,11 +35,31 @@ const PERMANENT_FAILURE_CODES = new Set([
   "USER_DISABLED",
 ]);
 
+/**
+ * 这些生物识别错误说明**这台设备现在根本做不了**，重试多少次都没用 →
+ * 直接回密码登录（并清掉本地凭据：设备上生物识别登记已变，Keystore 密钥
+ * 也几乎必然已失效，留着只会每次启动都白弹一次）。
+ *
+ * 注意别把 biometryLockout 放进来 —— 那是“失败次数过多临时锁定”，
+ * 等一会就能再用，清掉凭据对用户是损失。
+ */
+const BIOMETRIC_UNUSABLE_CODES = new Set([
+  "biometryNotEnrolled",
+  "biometryNotAvailable",
+  "passcodeNotSet",
+  "noDeviceCredential",
+]);
+
+export const FAIL_BIOMETRIC = "biometric";
+export const FAIL_SERVER = "server";
+
 export function useBiometricUnlock() {
   const navigate = useNavigate();
   const [state, setState] = useState(() => (isNative() ? GATE_CHECKING : GATE_DISABLED));
   const [busy, setBusy] = useState(false);
-  const [errorCode, setErrorCode] = useState("");
+  // { kind, code, message } —— message 优先展示（服务端可能给了具体原因，例如维护公告）
+  const [failure, setFailure] = useState(null);
+  const [attempts, setAttempts] = useState(0);
 
   // StrictMode 下 effect 会跑两次，用它避免连续弹两次指纹
   const attemptGuard = useRef(false);
@@ -51,7 +71,7 @@ export function useBiometricUnlock() {
 
   const unlock = useCallback(async () => {
     setBusy(true);
-    setErrorCode("");
+    setFailure(null);
     try {
       // 1) 系统生物识别
       await authenticate("验证指纹以登录 EazyCount");
@@ -77,12 +97,23 @@ export function useBiometricUnlock() {
         return;
       }
 
-      // 维护中等暂时性失败：保留凭据，留在锁屏让用户重试或改用密码
-      setErrorCode(result.code || "UNKNOWN");
+      // 维护中等暂时性失败：保留凭据，留在锁屏让用户重试或改用密码。
+      // 把服务端的 message 一并带上 —— 维护公告这类信息比“暂时不可用”有用得多。
+      setAttempts((n) => n + 1);
+      setFailure({ kind: FAIL_SERVER, code: result.code || "UNKNOWN", message: result.message || "" });
       setState(GATE_LOCKED);
     } catch (err) {
-      // 用户取消 / 指纹不匹配 / 锁定：留在锁屏，不认为是凭据失效
-      setErrorCode(String(err?.code || "cancelled"));
+      const code = String(err?.code || "cancelled");
+
+      if (BIOMETRIC_UNUSABLE_CODES.has(code)) {
+        // 这台设备做不了生物识别了，不要卡在重试上
+        await goDisabled(true);
+        return;
+      }
+
+      // 用户取消 / 指纹不匹配 / 临时锁定：留在锁屏
+      setAttempts((n) => n + 1);
+      setFailure({ kind: FAIL_BIOMETRIC, code, message: "" });
       setState(GATE_LOCKED);
     } finally {
       setBusy(false);
@@ -121,5 +152,5 @@ export function useBiometricUnlock() {
     void unlock();
   }, [state, unlock]);
 
-  return { state, busy, errorCode, unlock, usePasswordInstead };
+  return { state, busy, failure, attempts, unlock, usePasswordInstead };
 }

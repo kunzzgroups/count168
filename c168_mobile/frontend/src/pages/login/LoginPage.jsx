@@ -157,7 +157,7 @@ function EnrollModal({ open, busy, error, title, body, enableLabel, laterLabel, 
           {title}
         </h3>
         <p className="sc-login-modal-message">{error || body}</p>
-        <div className="sc-login-modal-actions">
+        <div className="sc-login-modal-actions sc-login-modal-actions--stack">
           <button
             type="button"
             className="sc-login-btn sc-login-btn-primary"
@@ -166,7 +166,12 @@ function EnrollModal({ open, busy, error, title, body, enableLabel, laterLabel, 
           >
             {busy ? <i className="fas fa-spinner fa-spin" aria-hidden="true" /> : enableLabel}
           </button>
-          <button type="button" className="sc-login-btn" onClick={onSkip} disabled={busy}>
+          <button
+            type="button"
+            className="sc-login-btn sc-login-btn--ghost"
+            onClick={onSkip}
+            disabled={busy}
+          >
             {laterLabel}
           </button>
         </div>
