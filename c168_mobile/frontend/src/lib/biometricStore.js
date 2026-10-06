@@ -200,27 +200,36 @@ export function writeModalityPref(value) {
 }
 
 /**
- * 这台设备具备哪些生物识别硬件（只有安卓会有多个）。
- * 用来决定要不要在设置里给用户「指纹 / 人脸」选择。
+ * 这台设备具备哪些生物识别硬件 / 到底可不可用。
  *
- * 返回 { fingerprint, face }，不把插件的枚举类型泄露给页面。
- * 拿不到一律返回 false —— 不显示选择，但**不要因此阻断开关**。
+ * 返回值故意分成 ok / why：以前只用一个字符串，“超时”和“系统说没有”
+ * 会得到完全一样的结果，排查时分不出来（已经吃过这个亏）。
+ *
+ *   { ok: true,  biometryType, biometryTypes, isAvailable, strongBiometryIsAvailable }
+ *   { ok: false, why }
  */
-export async function biometryModalities() {
-  const none = { fingerprint: false, face: false };
-  if (!isNative()) return none;
-  try {
-    const result = await withTimeout(BiometricAuth.checkBiometry(), 4000);
-    const list = Array.isArray(result?.biometryTypes) ? result.biometryTypes : [];
-    return {
-      fingerprint: list.includes(BiometryType.fingerprintAuthentication),
-      // 人脸与虹膜对用户而言都是「刷脸」，归为一类。
-      face:
-        list.includes(BiometryType.faceAuthentication) || list.includes(BiometryType.irisAuthentication),
-    };
-  } catch {
-    return none;
-  }
+export async function biometryInfo() {
+  if (!isNative()) return { ok: false, why: "not-native" };
+
+  // 自己管超时，不用 withTimeout —— 后者把“超时”和“抛错”都归成 null，
+  // 而这两者的排查方向完全不同。
+  const timeout = new Promise((resolve) =>
+    setTimeout(() => resolve({ ok: false, why: "timeout" }), 4000),
+  );
+  const call = BiometricAuth.checkBiometry().then(
+    (r) => ({
+      ok: true,
+      biometryType: r?.biometryType,
+      biometryTypes: Array.isArray(r?.biometryTypes) ? r.biometryTypes : [],
+      isAvailable: r?.isAvailable === true,
+      strongAvailable: r?.strongBiometryIsAvailable === true,
+      code: r?.code || "",
+      reason: r?.reason || "",
+    }),
+    (e) => ({ ok: false, why: `err ${e?.code || e?.message || e}` }),
+  );
+
+  return Promise.race([call, timeout]);
 }
 
 export async function authenticate() {

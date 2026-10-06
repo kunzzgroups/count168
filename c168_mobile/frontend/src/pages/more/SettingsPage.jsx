@@ -12,7 +12,7 @@ import { readLoginTheme, writeLoginTheme } from "../../lib/loginTheme.js";
 import { MORE_I18N } from "../../translateFile/moreTranslate.js";
 import { buildApiUrl } from "../../utils/apiUrl.js";
 import {
-  biometryModalities,
+  biometryInfo,
   clearToken,
   describeBiometry,
   getDeviceId,
@@ -74,7 +74,7 @@ export default function SettingsPage() {
    *
    * 初始值故意非空：如果连这一行都不显示，那就不是探测失败而是**包没更新**。
    */
-  const BIO_BUILD = "b11";
+  const BIO_BUILD = "b12";
   const [bioDiag, setBioDiag] = useState("boot");
   const i18n = useMemo(() => MORE_I18N[lang] || MORE_I18N.en, [lang]);
 
@@ -146,9 +146,14 @@ export default function SettingsPage() {
     } catch {
       label = "";
     }
-    // 同时具备指纹与人脸硬件时，才让用户选（只有一种时选择毫无意义）。
-    const mods = await biometryModalities();
-    const both = mods.fingerprint && mods.face;
+    // 拿到设备报告的生物识别信息。**只用于诊断显示**，不参与任何门槛
+    // （拿它当门槛就是之前两端置灰的原因）。
+    const info = await biometryInfo();
+    const probe = info.ok
+      ? `types=[${info.biometryTypes.join(",")}] weak=${info.isAvailable ? 1 : 0} strong=${
+          info.strongAvailable ? 1 : 0
+        }`
+      : `probe=${info.why}`;
     return {
       mode: "native",
       // 在原生壳里就是支持的：同一台机器的登录页已经能用指纹。
@@ -156,10 +161,7 @@ export default function SettingsPage() {
       enabled: Boolean(token),
       label,
       count: 0,
-      both,
-      note: `token=${token ? "yes" : "no"}${label ? "" : " probe=none"} mods=${
-        (mods.fingerprint ? "fp" : "") + (mods.face ? "+face" : "")
-      }`,
+      note: `token=${token ? "yes" : "no"} ${probe}`,
     };
   }, []);
 
