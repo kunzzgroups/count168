@@ -12,14 +12,17 @@ import { readLoginTheme, writeLoginTheme } from "../../lib/loginTheme.js";
 import { MORE_I18N } from "../../translateFile/moreTranslate.js";
 import { buildApiUrl } from "../../utils/apiUrl.js";
 import {
+  biometryModalities,
   clearToken,
   describeBiometry,
   getDeviceId,
   getDeviceName,
   isNative,
   loadToken,
+  readModalityPref,
   saveToken,
   withTimeout,
+  writeModalityPref,
 } from "../../lib/biometricStore.js";
 import { registerDeviceToken, revokeDeviceToken } from "../../lib/deviceTokenApi.js";
 import {
@@ -58,6 +61,10 @@ export default function SettingsPage() {
   const [bioExpiresAt, setBioExpiresAt] = useState("");
   const [bioCount, setBioCount] = useState(0);
   const [bioBusy, setBioBusy] = useState(false);
+  /** 设备**同时**具备指纹与人脸硬件 → 才显示「指纹 / 人脸」选择（安卓） */
+  const [bioChooseModality, setBioChooseModality] = useState(false);
+  /** 用户选的是 fingerprint | face，存本机（见 lib/biometricStore.js 的 readModalityPref） */
+  const [bioModality, setBioModality] = useState(() => readModalityPref());
   const [bioError, setBioError] = useState("");
   /**
    * ⚠️ 临时诊断：**每次改动必须递增这个号**。
@@ -69,7 +76,7 @@ export default function SettingsPage() {
    *
    * 初始值故意非空：如果连这一行都不显示，那就不是探测失败而是**包没更新**。
    */
-  const BIO_BUILD = "b8";
+  const BIO_BUILD = "b9";
   const [bioDiag, setBioDiag] = useState("boot");
   const i18n = useMemo(() => MORE_I18N[lang] || MORE_I18N.en, [lang]);
 
@@ -141,6 +148,9 @@ export default function SettingsPage() {
     } catch {
       label = "";
     }
+    // 同时具备指纹与人脸硬件时，才让用户选（只有一种时选择毫无意义）。
+    const mods = await biometryModalities();
+    const both = mods.fingerprint && mods.face;
     return {
       mode: "native",
       // 在原生壳里就是支持的：同一台机器的登录页已经能用指纹。
@@ -148,7 +158,10 @@ export default function SettingsPage() {
       enabled: Boolean(token),
       label,
       count: 0,
-      note: `token=${token ? "yes" : "no"}${label ? "" : " probe=none"}`,
+      both,
+      note: `token=${token ? "yes" : "no"}${label ? "" : " probe=none"} mods=${
+        (mods.fingerprint ? "fp" : "") + (mods.face ? "+face" : "")
+      }`,
     };
   }, []);
 
@@ -187,6 +200,7 @@ export default function SettingsPage() {
         setBioSupported(r.supported);
         setBioEnabled(r.enabled);
         setBioCount(r.count || 0);
+        setBioChooseModality(Boolean(r.both));
         setBioDiag(`native=${native ? 1 : 0} mode=${r.mode} sup=${r.supported ? 1 : 0} ${r.note}`);
       } catch (err) {
         // ⚠️ 探测自己抛错也必须留下痕迹，否则就是个沉默的死开关。
@@ -363,6 +377,33 @@ export default function SettingsPage() {
                 />
               )}
             </div>
+
+            {/*
+             * 安卓专用：设备**同时**有指纹与人脸硬件时，让用户选一个。
+             *
+             * 为何放到「开启之后」：这是解锁时的行为偏好，未开启时没有意义。
+             *
+             * ⚠️ 能落地的程度不一样（见 lib/biometricStore.js 的 readModalityPref）：
+             *   选指纹 → 传 strong → 真的只出指纹
+             *   选人脸 → 只能传 weak → 系统可能仍给指纹（安卓无「只用人脸」开关）
+             */}
+            {bioMode === "native" && bioChooseModality && bioEnabled ? (
+              <div className="m-more-settings-row">
+                <span>{i18n.bioModality || "Unlock with"}</span>
+                <MobileOnOffSwitch
+                  on={bioModality === "face"}
+                  disabled={false}
+                  onChange={(next) => {
+                    const value = next ? "face" : "fingerprint";
+                    writeModalityPref(value);
+                    setBioModality(value);
+                  }}
+                  ariaLabel={i18n.bioModality || "Unlock with"}
+                  onLabel={i18n.bioModalityFace || "Face"}
+                  offLabel={i18n.bioModalityFingerprint || "Fingerprint"}
+                />
+              </div>
+            ) : null}
 
             {/* 诊断行：本次排查专用，初始值就是 "boot"，
                 所以只要这行不出现，就说明设备跑的不是新包（而不是探测失败）。

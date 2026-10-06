@@ -19,7 +19,7 @@
  */
 
 import { Capacitor } from "@capacitor/core";
-import { BiometricAuth, BiometryType } from "@aparajita/capacitor-biometric-auth";
+import { BiometricAuth, BiometryType, AndroidBiometryStrength } from "@aparajita/capacitor-biometric-auth";
 import { SecureStorage } from "@aparajita/capacitor-secure-storage";
 import { readLoginLang } from "./loginLang.js";
 
@@ -168,11 +168,75 @@ export function getDeviceName() {
  *
  * 所以只传 reason（安卓上用作文案，iOS 上是必填的 localizedReason）。
  */
+/**
+ * 安卓上用户选的是「指纹」还是「人脸」。
+ *
+ * ⚠️ 安卓**没有**「只用人脸」这个开关：系统 BiometricPrompt 与插件原生层
+ * 都只区分强/弱生物识别（AuthActivity.java 里只有 BIOMETRIC_STRONG / WEAK /
+ * DEVICE_CREDENTIAL）。所以这个偏好能落地的程度分两种：
+ *
+ *   fingerprint → androidBiometryStrength: strong → **真的只出指纹** ✓
+ *                 （安卓上人脸几乎都是「弱」生物识别，会被排除）
+ *   face        → androidBiometryStrength: weak   → 系统可能仍给指纹 ✗
+ *
+ * 存在本机 localStorage：它描述的是「这台设备的用户偏好」，不该跨设备同步。
+ */
+const MODALITY_KEY = "ec_biometric_modality";
+
+export function readModalityPref() {
+  try {
+    return window.localStorage.getItem(MODALITY_KEY) === "face" ? "face" : "fingerprint";
+  } catch {
+    return "fingerprint";
+  }
+}
+
+export function writeModalityPref(value) {
+  try {
+    window.localStorage.setItem(MODALITY_KEY, value === "face" ? "face" : "fingerprint");
+  } catch {
+    /* 存不下就退到默认值，不阻断流程 */
+  }
+}
+
+/**
+ * 这台设备具备哪些生物识别硬件（只有安卓会有多个）。
+ * 用来决定要不要在设置里给用户「指纹 / 人脸」选择。
+ *
+ * 返回 { fingerprint, face }，不把插件的枚举类型泄露给页面。
+ * 拿不到一律返回 false —— 不显示选择，但**不要因此阻断开关**。
+ */
+export async function biometryModalities() {
+  const none = { fingerprint: false, face: false };
+  if (!isNative()) return none;
+  try {
+    const result = await withTimeout(BiometricAuth.checkBiometry(), 4000);
+    const list = Array.isArray(result?.biometryTypes) ? result.biometryTypes : [];
+    return {
+      fingerprint: list.includes(BiometryType.fingerprintAuthentication),
+      // 人脸与虹膜对用户而言都是「刷脸」，归为一类。
+      face:
+        list.includes(BiometryType.faceAuthentication) || list.includes(BiometryType.irisAuthentication),
+    };
+  } catch {
+    return none;
+  }
+}
+
 export async function authenticate() {
   const lang = readLoginLang();
+  const modality = readModalityPref();
   // 文案尽量短：系统弹窗本来就在上方显示应用名，
   // 再写一遍 “to EazyCount” 只会多折一行，让弹窗看起来拥挤。
-  const reason = lang === "zh" ? "验证指纹以登录" : "Verify your fingerprint to sign in";
+  // 文案要跟着用户选的方式走 —— 选的是人脸却写「验证指纹」是错的。
+  const reason =
+    lang === "zh"
+      ? modality === "face"
+        ? "验证人脸以登录"
+        : "验证指纹以登录"
+      : modality === "face"
+        ? "Verify your face to sign in"
+        : "Verify your fingerprint to sign in";
 
   await BiometricAuth.authenticate({
     reason,
@@ -183,6 +247,9 @@ export async function authenticate() {
     // 不允许用锁屏密码兜底：这里要的是「生物识别」本身，
     // 允许设备凭据会让「指纹解锁」名不副实。
     allowDeviceCredential: false,
+    // 按用户的选择限定强度（见 readModalityPref 上方说明）。
+    androidBiometryStrength:
+      modality === "face" ? AndroidBiometryStrength.weak : AndroidBiometryStrength.strong,
     // 仍然**不传** androidSubtitle：它与 reason 是两个不同的显示位置，
     // 传同一个字符串会上下显示两遍（见文件顶部说明）。
   });
