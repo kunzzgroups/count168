@@ -23,7 +23,6 @@ import {
   createPasskey,
   listPasskeys,
   passkeyErrorMessage,
-  platformAuthenticatorAvailable,
   removeAllPasskeys,
   webauthnSupported,
 } from "../../lib/webauthn.js";
@@ -108,8 +107,13 @@ export default function SettingsPage() {
         return;
       }
 
-      // 浏览器：靠 WebAuthn。安卓 WebView 不支持它，所以这里只会是真浏览器。
-      const supported = webauthnSupported() && (await platformAuthenticatorAvailable());
+      // 浏览器：只要支持 WebAuthn 就允许开关。
+      //
+      // 为什么**不**再把 platformAuthenticatorAvailable() 当门槛：
+      // 它在 iOS 上会给出假阴性（用户实际能成功注册 passkey，但该探测返回 false），
+      // 结果是开关被永久置灰、功能看着“不存在”。宁可放开开关，
+      // 让真正尝试时的错误说清楚原因（错误已按码映射为可读提示）。
+      const supported = webauthnSupported();
       if (cancelled) return;
       setBioMode("web");
       setBioTypeLabel("");
@@ -272,9 +276,11 @@ export default function SettingsPage() {
 
             <p className="m-more-settings-hint">
               {!bioSupported
-                ? i18n.bioUnsupportedHint || ""
+                ? (bioMode === "native"
+                    ? i18n.bioUnsupportedNativeHint
+                    : i18n.bioUnsupportedWebHint) || ""
                 : bioEnabled
-                  ? // 原生才报具体的指纹/人脸类型；浏览器端由 passkeyErrorMessage 在出错时说明
+                  ? // 原生才报具体的指纹/人脸类型
                     [i18n.bioEnabledHint || "", bioMode === "native" ? bioTypeLabel : ""]
                       .filter(Boolean)
                       .join(" · ")

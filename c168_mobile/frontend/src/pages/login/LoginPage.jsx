@@ -21,7 +21,6 @@ import { readLastCompanyId, writeLastCompanyId } from "../../lib/lastLoginPrefs.
 import {
   loginWithPasskey,
   passkeyErrorMessage,
-  platformAuthenticatorAvailable,
   webauthnSupported,
 } from "../../lib/webauthn.js";
 
@@ -405,7 +404,11 @@ export default function LoginPage() {
 
   // 登录页的生物识别入口。两端判据不同，但对用户是同一个按钮：
   //   原生（APK）—— 本地还存着凭据才值得显示（否则没什么可用）
-  //   浏览器 —— WebAuthn 可用且本机已录入生物识别
+  //   浏览器 —— 只要支持 WebAuthn 就显示。
+  //
+  // ⚠️ 浏览器端**不再**用 platformAuthenticatorAvailable() 当门槛：它在 iOS 上会给
+  // 假阴性（用户实际能注册并登录 passkey，该探测却返回 false），结果按钮直接不出现。
+  // 宁可显示按钮，让实际尝试时的错误说清楚原因。
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -414,9 +417,7 @@ export default function LoginPage() {
         if (!cancelled) setBioMode(stored ? "native" : "none");
         return;
       }
-      if (!webauthnSupported()) return;
-      const available = await platformAuthenticatorAvailable();
-      if (!cancelled) setBioMode(available ? "web" : "none");
+      if (!cancelled) setBioMode(webauthnSupported() ? "web" : "none");
     })();
     return () => {
       cancelled = true;

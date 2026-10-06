@@ -108,7 +108,16 @@ export function webauthnSupported() {
   }
 }
 
-/** 是否存在「平台验证器」（Face ID / Touch ID / 安卓指纹）—— 决定要不要给用户看刷脸入口 */
+/**
+ * 是否存在「平台验证器」（Face ID / Touch ID / 安卓指纹 / Windows Hello）。
+ *
+ * ⚠️ **不要拿它当显示开关/按钮的门槛。** 它在 iOS 上会给出**假阴性**：
+ * 用户实际能成功注册并登录 passkey，这个探测却返回 false。
+ * 曾经因此把设置页的开关和登录页的按钮都误杀成“不支持”。
+ * 真正的判据用 webauthnSupported()，让它失败时由具体错误码说明原因。
+ *
+ * 保留此函数：它在“想区分平台验证器 / 外部安全密钥”时仍然有用。
+ */
 export async function platformAuthenticatorAvailable() {
   if (!webauthnSupported()) return false;
   try {
