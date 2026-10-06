@@ -16,6 +16,7 @@ import { dirname, join } from "node:path";
 import {
   CAP,
   METHOD,
+  autoSwitchTarget,
   capabilityFromProbe,
   disabledSettings,
   migrateSettings,
@@ -262,6 +263,43 @@ test("系统临时锁定 → TEMPORARILY_LOCKED（不得当成没录入而清凭
       .state,
     CAP.TEMPORARILY_LOCKED,
   );
+});
+
+/* ── 自动换方式（产品要求：不询问；但未知时绝不换）──────────────── */
+
+const fpGone = capabilityFromProbe({ ok: true, isAvailable: true, strongAvailable: false });
+
+test("删了指纹、人脸还在 → 自动换成 FACE", () => {
+  assert.equal(autoSwitchTarget(METHOD.FINGERPRINT, fpGone), METHOD.FACE);
+});
+
+test("反向也成立：人脸没了、指纹还在 → 自动换成 FINGERPRINT", () => {
+  const faceGone = capabilityFromProbe({ ok: true, isAvailable: true, strongAvailable: true });
+  faceGone.faceAvailable = false;
+  assert.equal(autoSwitchTarget(METHOD.FACE, faceGone), METHOD.FINGERPRINT);
+});
+
+test("能力**未知**时绝不自动换（探测失败不能当成事实）", () => {
+  for (const cap of [
+    null,
+    undefined,
+    {},
+    { state: CAP.UNKNOWN },
+    { state: CAP.UNKNOWN, faceAvailable: null },
+  ]) {
+    assert.equal(autoSwitchTarget(METHOD.FINGERPRINT, cap), "", JSON.stringify(cap));
+  }
+});
+
+test("哪一种都没了 → 不换（应交给手动提示）", () => {
+  const none = capabilityFromProbe({ ok: true, isAvailable: false, strongAvailable: false });
+  assert.equal(autoSwitchTarget(METHOD.FINGERPRINT, none), "");
+  assert.equal(autoSwitchTarget(METHOD.FACE, none), "");
+});
+
+test("DISABLED / 非法 method → 没有可换的目标", () => {
+  assert.equal(autoSwitchTarget(METHOD.NONE, fpGone), "");
+  assert.equal(autoSwitchTarget("garbage", fpGone), "");
 });
 
 /* ── 运行 ─────────────────────────────────────────────────────────── */

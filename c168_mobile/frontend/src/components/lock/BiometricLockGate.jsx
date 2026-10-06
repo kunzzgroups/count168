@@ -1,7 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { readLoginLang } from "../../lib/loginLang.js";
-import { METHOD, ensureSettings, saveSettings } from "../../lib/biometricSettings.js";
-import { loadToken } from "../../lib/biometricStore.js";
+import {
+  METHOD,
+  autoSwitchTarget,
+  capabilityFromProbe,
+  ensureSettings,
+  saveSettings,
+} from "../../lib/biometricSettings.js";
+import { biometryInfo, loadToken } from "../../lib/biometricStore.js";
 import {
   FAIL_BIOMETRIC,
   GATE_CHECKING,
@@ -176,22 +182,49 @@ export default function BiometricLockGate({ children }) {
   );
 
   // 用户选的那种方式在这台设备上没了（例如在系统设置里删了指纹）。
-  // 规格 §7：**绝不自动改写偏好**，而是把选择交给用户。
+  // 产品要求：**自动换成另一种、不询问**（见 autoSwitchTarget）。
   const otherMethod = method === METHOD.FINGERPRINT ? METHOD.FACE : METHOD.FINGERPRINT;
-  const offerSwitch = Boolean(failure) && methodUnavailable(failure.code);
+  const needsSwitch = Boolean(failure) && methodUnavailable(failure.code);
 
-  const switchMethod = () => {
-    // 这一步是**用户显式选择**，不是静默回退：写入后立即重试
-    saveSettings({ enabled: true, method: otherMethod });
-    setMethod(otherMethod);
+  // 自动换只尝试一次 —— 否则探测一直说不确定时会陷入无限重试
+  const autoTried = useRef(false);
+  // 自动换不了（探测未知 / 另一种也没了）退化成手动按钮，并把原因说出来
+  const [switchManually, setSwitchManually] = useState(false);
+
+  const switchMethod = (target) => {
+    saveSettings({ enabled: true, method: target });
+    setMethod(target);
     void unlock();
   };
+
+  useEffect(() => {
+    if (!needsSwitch || autoTried.current) return undefined;
+    autoTried.current = true;
+    let cancelled = false;
+    (async () => {
+      const cap = capabilityFromProbe(await biometryInfo());
+      if (cancelled) return;
+      const target = autoSwitchTarget(method, cap);
+      if (!target) {
+        // 探测没给明确答案 → **绝不乱改设置**，把选择交给用户
+        setSwitchManually(true);
+        return;
+      }
+      switchMethod(target);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [needsSwitch, method]);
+
+  const offerSwitch = needsSwitch && switchManually;
 
   const switchButton = (primary) => (
     <button
       type="button"
       className={`bio-lock__btn ${primary ? "bio-lock__btn--primary" : "bio-lock__btn--ghost"} tap-scale`}
-      onClick={switchMethod}
+      onClick={() => switchMethod(otherMethod)}
       disabled={busy}
     >
       <i className={lockIcon(otherMethod)} aria-hidden="true" />

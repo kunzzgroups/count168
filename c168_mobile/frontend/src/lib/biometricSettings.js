@@ -218,6 +218,29 @@ export function capabilityFromProbe(info) {
   };
 }
 
+/**
+ * 自动换方式的**目标**（不能换时返回 ""）。
+ *
+ * 产品要求：用户选的那种方式在这台设备上没了（比如在系统里删了指纹），
+ * **自动换成另一种、不询问**。
+ *
+ * ⚠️ 但只在探测**明确**说目标可用（=== true）时才返回目标：
+ * unknown / null / undefined 一律返回 ""。
+ *
+ * 为何这么保守：把“探测失败”当成“不可用”是之前两次功能全瞎的原因；
+ * 反过来把“探测失败”当成“可用”同样会乱改用户的偏好。
+ * 宁愿退化成手动按钮，也不要在不确定的时候改设置。
+ */
+export function autoSwitchTarget(method, capability) {
+  if (method !== METHOD.FINGERPRINT && method !== METHOD.FACE) return "";
+  const other = method === METHOD.FINGERPRINT ? METHOD.FACE : METHOD.FINGERPRINT;
+  const available =
+    other === METHOD.FACE
+      ? capability?.faceAvailable === true
+      : capability?.fingerprintAvailable === true;
+  return available ? other : "";
+}
+
 /* ── 持久化（唯一碰 localStorage 的地方）────────────────────────────── */
 
 export function loadSettings() {
