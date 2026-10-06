@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#FFFFFF</color>
+    <!-- Adaptive-icon background colour. The launcher actually uses the gradient PNG in
+         mipmap-*/ic_launcher_background.png (see make-launcher-icons.py); this stays in sync
+         as the brand blue for anything that falls back to the colour. -->
+    <color name="ic_launcher_background">#004FF9</color>
 </resources>
