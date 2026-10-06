@@ -4,6 +4,7 @@ import { SECONDARY_VERIFY_I18N, localizeAuthApiMessage } from "../../translateFi
 import { useSyncedLoginLang, writeLoginLang } from "../../lib/loginLang.js";
 import { buildApiUrl } from "../../utils/apiUrl.js";
 import { resolveMobileLandingPath } from "../../utils/mobilePermissions.js";
+import { useBiometricEnrol, BiometricEnrolModal } from "../../components/lock/BiometricEnrolModal.jsx";
 import { useAuthBackground } from "./useAuthBackground.js";
 import PasswordInput from "../../components/PasswordInput.jsx";
 
@@ -28,6 +29,16 @@ export default function SecondaryPasswordPage({ variant }) {
   const config = VARIANT_CONFIG[variant];
   const navigate = useNavigate();
   const inputRef = useRef(null);
+
+  /**
+   * 开启生物识别的引导 —— 与密码登录页**共用**同一套（见该文件的说明）。
+   *
+   * 为何这个页面也必须过一遍：有二级密码的身份（owner 在后端无条件需要二级密码；
+   * C168 的 user 设了才需要）走的就是这条路 —— 密码登录页把用户 navigate 到这里，
+   * 这里输完再直接 navigate 进 App。原来引导只在密码登录页调用，
+   * 于是这条路上**从头到尾不会出现**，即“有二级密码的 owner 开不了生物识别”。
+   */
+  const enrol = useBiometricEnrol((targetPath) => navigate(targetPath, { replace: true }));
   const [lang, setLang] = useSyncedLoginLang();
   const [password, setPassword] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
@@ -132,6 +143,8 @@ export default function SecondaryPasswordPage({ variant }) {
       });
       const json = await res.json();
       if (res.ok && json?.success) {
+        // 先算出落地点，再交给引导（引导若接管跳转，我们就不要再 navigate）
+        let landing = "/dashboard";
         try {
           const userRes = await fetch(buildApiUrl("api/session/current_user_api.php"), {
             credentials: "include",
@@ -139,13 +152,13 @@ export default function SecondaryPasswordPage({ variant }) {
           });
           const userJson = await userRes.json();
           if (userRes.ok && userJson?.success && userJson?.data) {
-            navigate(resolveMobileLandingPath(userJson.data) || "/dashboard", { replace: true });
-            return;
+            landing = resolveMobileLandingPath(userJson.data) || "/dashboard";
           }
         } catch {
-          /* fall through */
+          /* 拿不到就落到默认页，不阻断登录 */
         }
-        navigate("/dashboard", { replace: true });
+        if (await enrol.offer(landing)) return;
+        navigate(landing, { replace: true });
         return;
       }
       setErrorMessage(localizeAuthApiMessage(json?.message, lang) || i18n.genericError);
@@ -260,6 +273,14 @@ export default function SecondaryPasswordPage({ variant }) {
             </form>
           </div>
         </div>
+
+        <BiometricEnrolModal
+          open={enrol.open}
+          busy={enrol.busy}
+          error={enrol.error}
+          onSkip={enrol.skip}
+          onEnable={() => void enrol.enable()}
+        />
       </div>
     </div>
   );

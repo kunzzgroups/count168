@@ -323,6 +323,28 @@ test("锁屏：hook 不得出现在提前 return 之后（否则解锁瞬间白�
   );
 });
 
+test("有二级密码的身份也必须能开启生物识别（二级密码页要过一遍引导）", () => {
+  const page = src("pages", "login", "SecondaryPasswordPage.jsx");
+  // owner 在后端是**无条件**需要二级密码的，这一页是它唯一的落地路径；
+  // 曾经这里直接 navigate 走，于是引导从头到尾不出现 → “有二级密码的 owner 开不了”。
+  assert.match(page, /useBiometricEnrol\(/, "二级密码页没接开启引导");
+  assert.match(page, /enrol\.offer\(/, "二级密码页没调用 offer");
+  assert.match(page, /BiometricEnrolModal/, "二级密码页没有渲染引导弹窗");
+});
+
+test("引导只在两个入口共用一个实现（不得再各自写一份）", () => {
+  const shared = src("components", "lock", "BiometricEnrolModal.jsx");
+  assert.match(shared, /export function useBiometricEnrol/);
+  assert.match(shared, /export function BiometricEnrolModal/);
+  // 密码登录页不得再自己实现一遍启用逻辑
+  const login = src("pages", "login", "LoginPage.jsx");
+  assert.equal(
+    /registerDeviceToken\(/.test(login),
+    false,
+    "LoginPage 又自己调了 registerDeviceToken —— 启用逻辑应只在共用模块里",
+  );
+});
+
 /* ── 运行 ─────────────────────────────────────────────────────────── */
 
 let failed = 0;

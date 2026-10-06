@@ -7,17 +7,8 @@ import { resolveMobileLandingPath } from "../../utils/mobilePermissions.js";
 import { useAuthBackground } from "./useAuthBackground.js";
 import PasswordInput from "../../components/PasswordInput.jsx";
 import { extractPlainTextFromRichText } from "../../utils/content/richTextSanitizer.js";
-import {
-  getDeviceId,
-  getDeviceName,
-  isAvailable as biometricAvailable,
-  isNative,
-  loadToken,
-  readBioOptOut,
-  saveToken,
-  writeBioOptOut,
-} from "../../lib/biometricStore.js";
-import { registerDeviceToken } from "../../lib/deviceTokenApi.js";
+import { isNative } from "../../lib/biometricStore.js";
+import { useBiometricEnrol, BiometricEnrolModal } from "../../components/lock/BiometricEnrolModal.jsx";
 import { readLastCompanyId, writeLastCompanyId } from "../../lib/lastLoginPrefs.js";
 import {
   getPasskeyId,
@@ -155,51 +146,6 @@ function AlertModal({ open, title, message, confirmText, onClose }) {
   );
 }
 
-function EnrollModal({ open, busy, error, title, body, enableLabel, laterLabel, onEnable, onSkip }) {
-  useEffect(() => {
-    if (!open) return undefined;
-    const onKey = (e) => {
-      if (e.key === "Escape" && !busy) onSkip();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [open, busy, onSkip]);
-
-  return (
-    <div
-      className={`sc-login-modal-overlay${open ? " is-open" : ""}`}
-      aria-hidden={open ? "false" : "true"}
-    >
-      <div className="sc-login-modal-box" role="dialog" aria-labelledby="enrollTitle">
-        <div className="sc-login-modal-icon-wrap">
-          <i className="fas fa-fingerprint sc-login-modal-icon" aria-hidden="true" />
-        </div>
-        <h3 id="enrollTitle" className="sc-login-modal-title">
-          {title}
-        </h3>
-        <p className="sc-login-modal-message">{error || body}</p>
-        <div className="sc-login-modal-actions sc-login-modal-actions--stack">
-          <button
-            type="button"
-            className="sc-login-btn sc-login-btn-primary"
-            onClick={onEnable}
-            disabled={busy}
-          >
-            {busy ? <i className="fas fa-spinner fa-spin" aria-hidden="true" /> : enableLabel}
-          </button>
-          <button
-            type="button"
-            className="sc-login-btn sc-login-btn--ghost"
-            onClick={onSkip}
-            disabled={busy}
-          >
-            {laterLabel}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -217,7 +163,6 @@ export default function LoginPage() {
   const [rememberMe, setRememberMe] = useState(false);
   const [maintenanceList, setMaintenanceList] = useState([]);
   const [modal, setModal] = useState({ open: false, title: "Notice", message: "" });
-  const [enroll, setEnroll] = useState({ open: false, targetPath: "", busy: false, error: "" });
   const [submitting, setSubmitting] = useState(false);
   const [lang, setLang] = useState(() => readLoginLang());
 
@@ -344,72 +289,23 @@ export default function LoginPage() {
    * 只在最终落地点调用（dashboard / member），不在二级密码跳转前调用 ——
    * 后端签发接口要求 secondary_password_verified === true。
    */
+  /**
+   * 开启引导（与二级密码页共用，见 components/lock/BiometricEnrolModal.jsx）。
+   * 为何抽成公共的：有二级密码的身份（owner 无条件需要）走的是**另一条路** ——
+   * LoginPage 把用户 navigate 到二级密码页，二级密码页成功后直接进 App，
+   * 引导从头到尾不会出现 ✗ 结果就是“有二级密码的 owner 开不了生物识别”。
+   */
+  const enrol = useBiometricEnrol((targetPath) => navigate(targetPath, { replace: true }));
+
   const finishLogin = useCallback(
     async (targetPath) => {
-      try {
-        // 弹「开启」引导的充要条件。
-        //
-        // ⚠️ 判断依据是「**没有凭据**」，不能改成「模型说未开启」：
-        // 没凭据意味着生物识别**现在就不可能成功**，而这种情形只有两种：
-        //   1. 从未开启；
-        //   2. 凭据被系统作废（改了指纹/录入变化/重装）—— 此时模型里 enabled 仍是 1，
-        //      若拿 enabled 当条件就会**既不弹引导、也无法登录**，用户被卡死。
-        //
-        // 那“每次登录都反复追问”的病根不在这里，而在 Use password 会删凭据
-        // （见 hooks/useBiometricUnlock.js 的 usePasswordInstead）—— 已在源头修掉。
-        const token = await loadToken();
-        const shouldOffer = isNative() && !readBioOptOut() && !token;
-        if (shouldOffer && (await biometricAvailable())) {
-          setEnroll({ open: true, targetPath, busy: false, error: "" });
-          return;
-        }
-      } catch {
-        /* 探测失败就静默跳过，不影响登录 */
-      }
+      // 引导已接管跳转就不要再 navigate
+      if (await enrol.offer(targetPath)) return;
       navigate(targetPath, { replace: true });
     },
-    [navigate],
+    [enrol, navigate],
   );
 
-  /** 是否开启指纹解锁；无论选哪个都继续跳转，不让用户卡在这里 */
-  const finishEnroll = useCallback(
-    async (enable) => {
-      const targetPath = enroll.targetPath || "/dashboard";
-      if (!enable) {
-        // 「暂不开启」要记住 —— 否则下次登录又问一遍
-        writeBioOptOut();
-        setEnroll({ open: false, targetPath: "", busy: false, error: "" });
-        navigate(targetPath, { replace: true });
-        return;
-      }
-
-      setEnroll((prev) => ({ ...prev, busy: true, error: "" }));
-      try {
-        const issued = await registerDeviceToken({
-          deviceId: getDeviceId(),
-          deviceName: getDeviceName(),
-        });
-        if (!issued.ok) {
-          // 失败不阻断登录，告知后可重试或直接进 App
-          setEnroll((prev) => ({
-            ...prev,
-            busy: false,
-            error:
-              issued.code === "DEVICE_LIMIT"
-                ? i18n.bioDeviceLimit
-                : i18n.bioEnableFailed,
-          }));
-          return;
-        }
-        await saveToken(issued.token);
-        setEnroll({ open: false, targetPath: "", busy: false, error: "" });
-        navigate(targetPath, { replace: true });
-      } catch {
-        setEnroll((prev) => ({ ...prev, busy: false, error: i18n.bioEnableFailed }));
-      }
-    },
-    [enroll.targetPath, i18n.bioDeviceLimit, i18n.bioEnableFailed, navigate],
-  );
 
   /**
    * 用 passkey（Face ID / 指纹）登录。
@@ -768,16 +664,12 @@ export default function LoginPage() {
         onClose={() => setModal((m) => ({ ...m, open: false }))}
       />
 
-      <EnrollModal
-        open={enroll.open}
-        busy={enroll.busy}
-        error={enroll.error}
-        title={i18n.bioTitle}
-        body={i18n.bioBody}
-        enableLabel={i18n.bioEnable}
-        laterLabel={i18n.bioLater}
-        onSkip={() => void finishEnroll(false)}
-        onEnable={() => void finishEnroll(true)}
+      <BiometricEnrolModal
+        open={enrol.open}
+        busy={enrol.busy}
+        error={enrol.error}
+        onSkip={enrol.skip}
+        onEnable={() => void enrol.enable()}
       />
     </>
   );
