@@ -18,7 +18,6 @@ import {
   writeBioOptOut,
 } from "../../lib/biometricStore.js";
 import { registerDeviceToken } from "../../lib/deviceTokenApi.js";
-import { ensureSettings } from "../../lib/biometricSettings.js";
 import { readLastCompanyId, writeLastCompanyId } from "../../lib/lastLoginPrefs.js";
 import {
   getPasskeyId,
@@ -348,15 +347,18 @@ export default function LoginPage() {
   const finishLogin = useCallback(
     async (targetPath) => {
       try {
-        // 弹「开启」引导的充要条件。三个条件缺一不可：
-        //   1. 在原生壳里（网页端走 passkey，不弹这个）
-        //   2. 用户没有拒绝过（否则每次登录都追问 —— 已经出过这个 bug）
-        //   3. **模型里本来就没开**。模型说已开却还弹「开启」，
-        //      会让人以为功能被关掉了；那种情况属于「修复」而不是「开启」，
-        //      用另一个表述处理，不能复用这个弹窗。
+        // 弹「开启」引导的充要条件。
+        //
+        // ⚠️ 判断依据是「**没有凭据**」，不能改成「模型说未开启」：
+        // 没凭据意味着生物识别**现在就不可能成功**，而这种情形只有两种：
+        //   1. 从未开启；
+        //   2. 凭据被系统作废（改了指纹/录入变化/重装）—— 此时模型里 enabled 仍是 1，
+        //      若拿 enabled 当条件就会**既不弹引导、也无法登录**，用户被卡死。
+        //
+        // 那“每次登录都反复追问”的病根不在这里，而在 Use password 会删凭据
+        // （见 hooks/useBiometricUnlock.js 的 usePasswordInstead）—— 已在源头修掉。
         const token = await loadToken();
-        const settings = ensureSettings(Boolean(token));
-        const shouldOffer = isNative() && !readBioOptOut() && !settings.enabled && !token;
+        const shouldOffer = isNative() && !readBioOptOut() && !token;
         if (shouldOffer && (await biometricAvailable())) {
           setEnroll({ open: true, targetPath, busy: false, error: "" });
           return;
