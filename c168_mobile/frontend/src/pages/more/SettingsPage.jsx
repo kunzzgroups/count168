@@ -201,20 +201,18 @@ export default function SettingsPage() {
           <section className="m-more-settings-group" aria-label={i18n.biometric || "Fingerprint unlock"}>
             <div className="m-more-settings-row">
               <span>{i18n.biometric || "Fingerprint unlock"}</span>
-              {bioSupported ? (
-                bioBusy ? (
-                  <i className="fas fa-spinner fa-spin" aria-hidden="true" />
-                ) : (
-                  <MobileOnOffSwitch
-                    on={bioEnabled}
-                    onChange={(next) => void toggleBiometric(next)}
-                    ariaLabel={i18n.biometric || "Fingerprint unlock"}
-                    onLabel={i18n.bioOn || "On"}
-                    offLabel={i18n.bioOff || "Off"}
-                  />
-                )
+              {/* 开关始终渲染：位置要能看到。浏览器 / 旧 APK 上置灰，由下方说明解释原因 */}
+              {bioBusy ? (
+                <i className="fas fa-spinner fa-spin" aria-hidden="true" />
               ) : (
-                <em>{i18n.bioUnsupported || "Not available on this device"}</em>
+                <MobileOnOffSwitch
+                  on={bioEnabled}
+                  disabled={!bioSupported}
+                  onChange={(next) => void toggleBiometric(next)}
+                  ariaLabel={i18n.biometric || "Biometric Unlock"}
+                  onLabel={i18n.bioOn || "On"}
+                  offLabel={i18n.bioOff || "Off"}
+                />
               )}
             </div>
 

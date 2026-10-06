@@ -12,39 +12,43 @@ import "./more.css";
 const TEXT = {
   zh: {
     title: "我的登录设备",
-    intro: "已开启指纹解锁的设备。下线后该设备需重新用密码登录。",
-    empty: "还没有开启指纹解锁的设备",
-    emptyHint: "在登录页开启指纹解锁后，设备会出现在这里。",
+    intro: "已开启生物识别解锁的设备。下线后该设备需重新用密码登录。",
+    empty: "还没有开启生物识别解锁的设备",
+    emptyHint: "在「设置」里开启生物识别解锁后，设备会出现在这里。",
+    webOnlyHint: "生物识别解锁需要安卓 App。在浏览器里请改用「记住我」。",
     current: "本机",
     revoked: "已下线",
     expired: "已过期",
     lastUsed: "最近使用",
     never: "从未使用",
+    addedAt: "添加于",
     expiresAt: "到期",
     revoke: "下线",
     confirm: "确认下线",
     cancel: "取消",
-    quota: "已用 {used}/{max} 台",
-    quotaFull: "已达上限，需先下线一台才能在新设备上开启",
+    quota: "已用 {used} / {max} 台",
+    quotaFull: "已达上限，需先下线一台才能在新设备上开启。",
     loading: "加载中…",
     failed: "操作失败，请重试",
   },
   en: {
     title: "Login devices",
-    intro: "Devices with fingerprint unlock enabled. Revoking requires a password login again.",
-    empty: "No devices with fingerprint unlock yet",
-    emptyHint: "Enable fingerprint unlock on the login screen and the device will show up here.",
+    intro: "Devices with biometric unlock enabled. Revoking requires a password login again.",
+    empty: "No devices with biometric unlock yet",
+    emptyHint: "Enable biometric unlock in Settings and the device will show up here.",
+    webOnlyHint: "Biometric unlock needs the Android app. In a browser, use “Remember me” instead.",
     current: "This device",
     revoked: "Revoked",
     expired: "Expired",
     lastUsed: "Last used",
     never: "Never used",
+    addedAt: "Added",
     expiresAt: "Expires",
     revoke: "Revoke",
     confirm: "Confirm",
     cancel: "Cancel",
-    quota: "{used}/{max} devices used",
-    quotaFull: "Limit reached — revoke one device before enabling on a new one",
+    quota: "{used} / {max} devices used",
+    quotaFull: "Limit reached — revoke one device before enabling on a new one.",
     loading: "Loading…",
     failed: "Action failed, please retry",
   },
@@ -59,6 +63,12 @@ function formatDateTime(value) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(
     date.getHours(),
   )}:${pad(date.getMinutes())}`;
+}
+
+/** 只要日期部分，用于「添加于 / 到期」这类次要信息 */
+function formatDate(value) {
+  const full = formatDateTime(value);
+  return full ? full.slice(0, 10) : "";
 }
 
 export default function LoginDevicesPage() {
@@ -137,6 +147,7 @@ export default function LoginDevicesPage() {
 
   const companyCode = String(me?.company_code || me?.company_id || "").toUpperCase();
   const groupId = String(me?.login_group_id || me?.login_identifier || "").toUpperCase();
+  const quotaFull = max > 0 && active >= max;
 
   return (
     <MobileShell
@@ -146,9 +157,7 @@ export default function LoginDevicesPage() {
       groupId={groupId}
       onLogout={() => navigate("/login", { replace: true })}
       lang={lang}
-      stickyBar={
-        <MobileSubpageHeader backTo="/more" backAriaLabel={t.cancel} title={t.title} />
-      }
+      stickyBar={<MobileSubpageHeader backTo="/more" backAriaLabel={t.cancel} title={t.title} />}
     >
       <main className="m-more-page m-more-page--settings">
         {loading ? (
@@ -158,35 +167,28 @@ export default function LoginDevicesPage() {
         ) : (
           <>
             <section className="m-more-settings-group" aria-label={t.title}>
-              <div className="m-more-settings-row">
-                <span>{t.intro}</span>
+              <div className="m-bio-block">
+                <p className="m-bio-block__text">{t.intro}</p>
               </div>
               <div className="m-more-settings-row">
                 <span>{t.quota.replace("{used}", String(active)).replace("{max}", String(max))}</span>
-                {max > 0 && active >= max ? <em>{t.quotaFull}</em> : null}
               </div>
+              {quotaFull ? <p className="m-more-settings-hint m-more-settings-hint--warn">{t.quotaFull}</p> : null}
             </section>
 
             {error ? (
               <section className="m-more-settings-group">
-                <div className="m-more-settings-row">
-                  <span role="alert">{error}</span>
-                </div>
-              </section>
-            ) : null}
-
-            {!isNative() ? (
-              <section className="m-more-settings-group">
-                <div className="m-more-settings-row">
-                  <span>{t.emptyHint}</span>
-                </div>
+                <p className="m-more-settings-hint m-more-settings-hint--error" role="alert">
+                  {error}
+                </p>
               </section>
             ) : null}
 
             {devices.length === 0 ? (
               <section className="m-more-settings-group">
-                <div className="m-more-settings-row">
-                  <span>{t.empty}</span>
+                <div className="m-bio-block">
+                  <p className="m-bio-block__text m-bio-block__text--strong">{t.empty}</p>
+                  <p className="m-bio-block__text">{isNative() ? t.emptyHint : t.webOnlyHint}</p>
                 </div>
               </section>
             ) : (
@@ -194,52 +196,61 @@ export default function LoginDevicesPage() {
                 {devices.map((device) => {
                   const isRevoked = !!device.revoked_at;
                   const statusLabel = isRevoked ? t.revoked : device.is_active ? "" : t.expired;
+                  const name = device.device_name || device.device_id.slice(0, 8);
                   const lastUsed = device.last_used_at
                     ? `${t.lastUsed} ${formatDateTime(device.last_used_at)}`
                     : t.never;
 
                   return (
-                    <div key={device.device_id} className="m-more-settings-row">
-                      <div className="m-more-profile-copy">
-                        <strong>
-                          {device.device_name || device.device_id.slice(0, 8)}
-                          {device.is_current ? <em> · {t.current}</em> : null}
-                          {statusLabel ? <em> · {statusLabel}</em> : null}
+                    <div key={device.device_id} className="m-bio-device">
+                      <div className="m-bio-device__head">
+                        {/* min-width:0 + ellipsis 在 CSS 里 —— 否则长设备名会把
+                            右侧操作按钮挤出屏幕（这就是之前布局崩掉的原因之一） */}
+                        <strong className="m-bio-device__name" title={name}>
+                          {name}
                         </strong>
-                        <span>{lastUsed}</span>
-                        <span>
-                          {t.expiresAt} {formatDateTime(device.expires_at)}
-                        </span>
+                        {device.is_current ? (
+                          <em className="m-bio-tag m-bio-tag--current">{t.current}</em>
+                        ) : null}
+                        {statusLabel ? <em className="m-bio-tag">{statusLabel}</em> : null}
+
+                        <div className="m-bio-device__actions">
+                          {isRevoked ? null : busyId === device.device_id ? (
+                            <i className="fas fa-spinner fa-spin" aria-hidden="true" />
+                          ) : confirmId === device.device_id ? (
+                            <>
+                              <button
+                                type="button"
+                                className="m-more-settings-link m-more-settings-link--danger"
+                                onClick={() => void handleRevoke(device)}
+                              >
+                                {t.confirm}
+                              </button>
+                              <button
+                                type="button"
+                                className="m-more-settings-link"
+                                onClick={() => setConfirmId("")}
+                              >
+                                {t.cancel}
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              type="button"
+                              className="m-more-settings-link m-more-settings-link--danger"
+                              onClick={() => setConfirmId(device.device_id)}
+                            >
+                              {t.revoke}
+                            </button>
+                          )}
+                        </div>
                       </div>
 
-                      {isRevoked ? null : busyId === device.device_id ? (
-                        <i className="fas fa-spinner fa-spin" aria-hidden="true" />
-                      ) : confirmId === device.device_id ? (
-                        <span>
-                          <button
-                            type="button"
-                            className="m-more-logout tap-scale"
-                            onClick={() => void handleRevoke(device)}
-                          >
-                            {t.confirm}
-                          </button>
-                          <button
-                            type="button"
-                            className="m-more-logout tap-scale"
-                            onClick={() => setConfirmId("")}
-                          >
-                            {t.cancel}
-                          </button>
-                        </span>
-                      ) : (
-                        <button
-                          type="button"
-                          className="m-more-logout tap-scale"
-                          onClick={() => setConfirmId(device.device_id)}
-                        >
-                          {t.revoke}
-                        </button>
-                      )}
+                      <span className="m-bio-device__meta">{lastUsed}</span>
+                      <span className="m-bio-device__meta">
+                        {t.addedAt} {formatDate(device.created_at)} · {t.expiresAt}{" "}
+                        {formatDate(device.expires_at)}
+                      </span>
                     </div>
                   );
                 })}

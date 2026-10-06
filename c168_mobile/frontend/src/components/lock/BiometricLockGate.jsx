@@ -12,8 +12,8 @@ import "./biometric-lock.css";
 const TEXT = {
   zh: {
     verifying: "正在验证…",
-    lockedTitle: "指纹解锁",
-    lockedHint: "请使用指纹解锁 EazyCount",
+    lockedTitle: "生物识别解锁",
+    lockedHint: "请用指纹 / 人脸解锁 EazyCount",
     retry: "重试",
     usePassword: "用密码登录",
     checking: "正在检查登录状态…",
@@ -22,8 +22,8 @@ const TEXT = {
   },
   en: {
     verifying: "Verifying…",
-    lockedTitle: "Fingerprint unlock",
-    lockedHint: "Unlock EazyCount with your fingerprint",
+    lockedTitle: "Biometric Unlock",
+    lockedHint: "Unlock EazyCount with your fingerprint or face",
     retry: "Try again",
     usePassword: "Use password",
     checking: "Checking your session…",

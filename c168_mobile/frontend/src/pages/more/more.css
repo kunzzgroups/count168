@@ -133,6 +133,99 @@
   cursor: pointer;
 }
 
+.m-more-settings-link:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.m-more-settings-link--danger {
+  color: var(--m-color-danger-text);
+}
+
+.m-more-settings-hint--warn {
+  color: var(--m-color-warning-text);
+}
+
+/* 设置组内部的整段文字（不参与 row 的 flex 布局，所以能自然换行） */
+.m-bio-block {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.7rem 0.9rem;
+}
+
+.m-bio-block__text {
+  margin: 0;
+  color: var(--m-color-muted);
+  font-size: var(--m-text-small);
+  line-height: 1.5;
+}
+
+.m-bio-block__text--strong {
+  color: var(--m-color-text);
+  font-weight: 700;
+}
+
+/* 一台设备一条。
+   注意下面的 min-width: 0 + ellipsis：没有它，长设备名会把右侧操作按钮
+   挤出屏幕（曾经用全宽的 .m-more-logout 当行内按钮，结果变成整行蓝条并压住文字）。 */
+.m-bio-device {
+  padding: 0.7rem 0.9rem;
+}
+
+.m-bio-device + .m-bio-device {
+  border-top: 1px solid var(--m-color-ring);
+}
+
+.m-bio-device__head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.m-bio-device__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--m-color-text);
+  font-size: var(--m-text-body);
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.m-bio-device__actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 0.7rem;
+  align-items: center;
+}
+
+.m-bio-device__meta {
+  display: block;
+  margin-top: 0.15rem;
+  color: var(--m-color-muted);
+  font-size: var(--m-text-small);
+  line-height: 1.45;
+}
+
+.m-bio-tag {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 0.1rem 0.45rem;
+  background: var(--m-color-surface-muted);
+  color: var(--m-color-muted);
+  font-size: var(--m-text-micro, 0.7rem);
+  font-style: normal;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.m-bio-tag--current {
+  background: var(--m-color-primary-soft);
+  color: var(--m-color-primary-soft-text);
+}
+
 .m-more-heading {
   margin-bottom: 1rem;
 }
