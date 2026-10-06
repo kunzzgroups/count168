@@ -27,7 +27,6 @@ import {
 import {
   createPasskey,
   biometricDiagnostic,
-  isStandaloneWebApp,
   listPasskeys,
   passkeyErrorMessage,
   removeAllPasskeys,
@@ -62,9 +61,6 @@ export default function SettingsPage() {
   const [bioExpiresAt, setBioExpiresAt] = useState("");
   const [bioCount, setBioCount] = useState(0);
   const [bioBusy, setBioBusy] = useState(false);
-  // 诊断串：探测失败时一并显示，用于定位到底是哪个条件不成立。
-  // 我在本机无法测 iOS，所以先靠这个换取确定性；定了因就可以删。
-  const [bioDiag, setBioDiag] = useState("");
   const [bioError, setBioError] = useState("");
   const i18n = useMemo(() => MORE_I18N[lang] || MORE_I18N.en, [lang]);
 
@@ -145,7 +141,14 @@ export default function SettingsPage() {
       setBioMode("remember");
       setBioTypeLabel("");
       setBioSupported(true);
-      setBioDiag(biometricDiagnostic());
+      // 产品要求这一行只有 on/off，不放任何说明文字。
+      // 诊断改到 console：屏幕上不占位置，但万一还有问题仍可定位。
+      try {
+        // eslint-disable-next-line no-console
+        console.warn("[biometric] fallback to remember-mode:", biometricDiagnostic());
+      } catch {
+        /* console 不可用就算了 */
+      }
       const remembered = await getRememberDevice();
       if (cancelled) return;
       setBioEnabled(remembered.enabled === true);
@@ -228,35 +231,10 @@ export default function SettingsPage() {
     [bioEnabled, bioMode, i18n.bioDeviceLimit, i18n.bioEnableFailed, lang],
   );
 
-  // ── 生物识别那一行的派生文案（三种后端共用一行，所以标题与说明跟着模式变）──
+  // 这一行只显示「标题 + on/off」（产品要求：不要多余说明文字），
+  // 所以只需要算出标题。三种后端共用一行，标题跟着模式变，避免名不副实。
   const bioLabel =
     bioMode === "remember" ? i18n.rememberDevice || "Stay signed in" : i18n.biometric;
-  let bioHint = "";
-  if (bioMode === "remember") {
-    bioHint = bioEnabled
-      ? [
-          i18n.rememberDeviceOnHint || "",
-          bioExpiresAt ? `${i18n.rememberDeviceExpires || ""} ${bioExpiresAt}` : "",
-        ]
-          .filter(Boolean)
-          .join(" · ")
-      : i18n.rememberDeviceOffHint || "";
-  } else if (!bioSupported) {
-    // 只有原生分支可能走到这里：设备没录入指纹/人脸，或 APK 里没有插件
-    bioHint = i18n.bioUnsupportedNativeHint || "";
-  } else if (!bioEnabled) {
-    bioHint = i18n.bioDisabledHint || "";
-  } else {
-    // 原生报具体的指纹/人脸类型；passkey 模式报已保存的数量
-    bioHint = [
-      i18n.bioEnabledHint || "",
-      bioMode === "native" ? bioTypeLabel : "",
-      bioMode === "passkey" ? `${i18n.bioPasskeys || ""} ${bioCount}` : "",
-    ]
-      .filter(Boolean)
-      .join(" · ");
-  }
-  const currentUrl = typeof window !== "undefined" ? window.location.href : "";
 
   const companyCode = String(me?.company_code || me?.company_id || "").toUpperCase();
   const groupId = String(me?.login_group_id || me?.login_identifier || "").toUpperCase();
@@ -329,7 +307,7 @@ export default function SettingsPage() {
           <section className="m-more-settings-group" aria-label={bioLabel || "Biometric Unlock"}>
             <div className="m-more-settings-row">
               <span>{bioLabel || "Biometric Unlock"}</span>
-              {/* 开关始终渲染：位置要能看到 */}
+              {/* 只留 on / off，不放任何说明文字（产品要求） */}
               {bioBusy ? (
                 <i className="fas fa-spinner fa-spin" aria-hidden="true" />
               ) : (
@@ -344,29 +322,7 @@ export default function SettingsPage() {
               )}
             </div>
 
-            <p className="m-more-settings-hint">{bioHint}</p>
-
-            {/* 无 WebAuthn 且是「添加到主屏幕」打开时：说明 Face ID 只能在 Safari 里用，
-                并给一个可直接打开的入口。仅在 standalone 下显示 —— 安卓老 APK
-                也会落进 remember 模式，那里提示 Safari 是错的。 */}
-            {bioMode === "remember" && isStandaloneWebApp() ? (
-              <p className="m-more-settings-hint">
-                {i18n.bioSafariHint}{" "}
-                <a
-                  className="m-more-settings-link"
-                  href={currentUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  {i18n.bioOpenInSafari}
-                </a>
-              </p>
-            ) : null}
-
-            {bioDiag ? (
-              <p className="m-more-settings-hint">{`[${bioDiag}]`}</p>
-            ) : null}
-
+            {/* 只在真的出错时提示一行；成功/正常状态不占任何文字 */}
             {bioError ? (
               <p className="m-more-settings-hint m-more-settings-hint--error" role="alert">
                 {bioError}
