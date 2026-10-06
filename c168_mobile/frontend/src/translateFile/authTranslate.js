@@ -102,7 +102,7 @@ export const LOGIN_I18N = {
     bioEnable: "Enable",
     bioLater: "Not now",
     bioEnableFailed: "Could not enable biometric unlock.",
-    bioDeviceLimit: "Too many devices. Remove one under More > Login devices first.",
+    bioDeviceLimit: "Could not enable biometric unlock. Please try again.",
   },
   zh: {
     admin: "管理员",
@@ -131,7 +131,7 @@ export const LOGIN_I18N = {
     bioEnable: "开启",
     bioLater: "暂不开启",
     bioEnableFailed: "开启生物识别解锁失败。",
-    bioDeviceLimit: "设备数已达上限，请先在「更多 > 我的登录设备」里下线一台。",
+    bioDeviceLimit: "开启生物识别解锁失败，请重试。",
   },
 };
 

@@ -229,17 +229,6 @@ export default function SettingsPage() {
                 {bioError}
               </p>
             ) : null}
-
-            <div className="m-more-settings-row">
-              <span>{i18n.loginDevices || "Login devices"}</span>
-              <button
-                type="button"
-                className="m-more-settings-link tap-scale"
-                onClick={() => navigate("/more/login-devices")}
-              >
-                {i18n.bioManage || "Manage"}
-              </button>
-            </div>
           </section>
 
             <button type="button" className="m-more-logout tap-scale" onClick={() => void logout()}>

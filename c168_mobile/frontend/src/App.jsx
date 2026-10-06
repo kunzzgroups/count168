@@ -24,7 +24,6 @@ import CustomerReportPage from "./pages/report/CustomerReportPage.jsx";
 import MobileBottomNavHost from "./components/layout/MobileBottomNavHost.jsx";
 import MobileRealtimeBridge from "./lib/realtime/MobileRealtimeBridge.jsx";
 import BiometricLockGate from "./components/lock/BiometricLockGate.jsx";
-import LoginDevicesPage from "./pages/more/LoginDevicesPage.jsx";
 
 /** Drop list snapshot when leaving Transaction so bottom-nav re-entry stays default. */
 function ClearTxListSnapshotOutsideTransaction() {
@@ -64,7 +63,6 @@ export default function App() {
         <Route path="/more/announcement" element={<AnnouncementPage />} />
         <Route path="/more/auto-renew" element={<AutoRenewPage />} />
         <Route path="/more/ownership" element={<OwnershipPage />} />
-        <Route path="/more/login-devices" element={<LoginDevicesPage />} />
         <Route path="/reset-password" element={<StubPage title="重置密码" />} />
         <Route
           path="/owner-secondary-password"

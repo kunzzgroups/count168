@@ -332,6 +332,52 @@ function device_token_count_active(PDO $pdo, string $userType, int $userId, stri
 }
 
 /**
+ * 超限时淘汰「最久未用」的那一台（吐销，保留历史）。
+ *
+ * 为什么需要自愈：设备管理界面已按产品要求去掉，但硬上限还在。
+ * 没有界面又没有自愈，用户重装 App 五次就会永久无法再开启指纹解锁 —— 无法自救。
+ *
+ * 排序用 COALESCE(last_used_at, created_at)：从未用过的记录按创建时间参与比较，
+ * 所以“最近用过”比“创建得早”更不容易被淘汰。同值时按 id 升序，保证确定性。
+ *
+ * @return bool 是否真的腾出了位置
+ */
+function device_token_evict_lru(PDO $pdo, string $userType, int $userId, string $kind): bool
+{
+    try {
+        $stmt = $pdo->prepare(
+            'SELECT id FROM device_token
+             WHERE user_type = ? AND user_id = ? AND kind = ?
+               AND revoked_at IS NULL AND expires_at > NOW()
+             ORDER BY COALESCE(last_used_at, created_at) ASC, id ASC
+             LIMIT 1'
+        );
+        $stmt->execute([$userType, $userId, $kind]);
+        $victim = $stmt->fetchColumn();
+        if ($victim === false) {
+            return false;
+        }
+
+        error_log(sprintf(
+            'device_token_evict_lru: user_type=%s user_id=%d kind=%s evicted id=%d',
+            $userType,
+            $userId,
+            $kind,
+            (int) $victim
+        ));
+
+        $upd = $pdo->prepare('UPDATE device_token SET revoked_at = NOW() WHERE id = ?');
+        $upd->execute([(int) $victim]);
+
+        return $upd->rowCount() > 0;
+    } catch (Throwable $e) {
+        error_log('device_token_evict_lru failed: ' . $e->getMessage());
+
+        return false;
+    }
+}
+
+/**
  * 签发令牌。同一账号同一设备重复开启 = 覆盖旧令牌（uk_device）。
  *
  * @param array<string, mixed> $snapshot
@@ -377,7 +423,14 @@ function device_token_issue(
         // 配额只看同 kind：网页端记住我不能占掉手机的 5 台指纹额度
         if ($existing === false
             && device_token_count_active($pdo, $userType, $userId, $kind) >= DEVICE_TOKEN_MAX_DEVICES) {
-            return ['ok' => false, 'code' => 'DEVICE_LIMIT'];
+            // 产品要求「设置里只要一个开关」，所以设备管理界面被去掉了。
+            // 没有界面却保留硬上限，会让多次重装 App 的用户永久卡死
+            // （重装会换 device_id，旧记录一直占位）—— 所以改为自愈式淘汰。
+            // 仍把 DEVICE_LIMIT 留着做兜底：淘汰失败时不静默丢凭据。
+            if (!device_token_evict_lru($pdo, $userType, $userId, $kind)
+                || device_token_count_active($pdo, $userType, $userId, $kind) >= DEVICE_TOKEN_MAX_DEVICES) {
+                return ['ok' => false, 'code' => 'DEVICE_LIMIT'];
+            }
         }
 
         $plain = bin2hex(random_bytes(32));

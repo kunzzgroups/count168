@@ -201,7 +201,10 @@ ok('新令牌可用', device_token_resolve($pdo, $r2['token'], 'devAAA')['ok']);
 $n = (int) $pdo->query('SELECT COUNT(*) FROM device_token WHERE user_id=11')->fetchColumn();
 ok('同设备仍只有 1 行', $n === 1, "实际 $n");
 
-echo "\n=== 6. 设备数上限 5 ===\n";
+echo "\n=== 6. 设备数上限 5：超限自愈式淘汰 ===\n";
+// 产品要求设置里只留一个开关 → 设备管理界面已去掉。
+// 没有界面却保留硬上限，会让多次重装 App 的用户（重装会换 device_id）永久卡死，
+// 所以改为淘汰【最久未用】的那一台。
 clean($pdo);
 $tokens = [];
 for ($i = 1; $i <= 5; $i++) {
@@ -211,23 +214,67 @@ for ($i = 1; $i <= 5; $i++) {
     }
 }
 ok('5 台全部签发成功', count($tokens) === 5, '实际 ' . count($tokens));
+ok('活跃数为 5', device_token_count_active($pdo, 'user', 11) === 5);
 $r6 = device_token_issue($pdo, 'user', 11, 'dev6', 'Phone 6', $snap);
-ok('第 6 台 → DEVICE_LIMIT', !$r6['ok'] && $r6['code'] === 'DEVICE_LIMIT', $r6['code'] ?? '');
-ok('第 6 台未落库',
-    (int) $pdo->query('SELECT COUNT(*) FROM device_token WHERE user_id=11')->fetchColumn() === 5);
-ok('达上限时原有设备仍可用', device_token_resolve($pdo, $tokens[1], 'dev1')['ok']);
-ok('达上限时未被自动踢掉（多设备硬需求）', device_token_count_active($pdo, 'user', 11) === 5);
+ok('第 6 台仍可签发（不再返回 DEVICE_LIMIT）', $r6['ok'], $r6['code'] ?? '');
+ok('活跃数仍为 5（不会无限增长）', device_token_count_active($pdo, 'user', 11) === 5);
+ok('最久未用的 dev1 被淘汰',
+    device_token_resolve($pdo, $tokens[1], 'dev1')['code'] === 'TOKEN_REVOKED');
+ok('dev1 是被吊销而非删除（保留历史）',
+    (int) $pdo->query("SELECT COUNT(*) FROM device_token WHERE device_id='dev1'")->fetchColumn() === 1);
+ok('dev2 未受影响', device_token_resolve($pdo, $tokens[2], 'dev2')['ok']);
+ok('新设备可用', device_token_resolve($pdo, $r6['token'], 'dev6')['ok']);
+
+// LRU 语义验证。
+// 注意：created_at / last_used_at 都是【秒】精度，同一秒内创建的记录 sortkey 完全并列，
+// 此时靠 id ASC 决定确定性 —— 那样的用例其实只验证了 id 顺序，验证不了 LRU。
+// 所以这里显式把创建时间拉开，再让 lru1/lru2 变成“最近用过”。
+clean($pdo);
+$tk = [];
+for ($i = 1; $i <= 5; $i++) {
+    $tk[$i] = device_token_issue($pdo, 'user', 11, "lru$i", "P$i", $snap)['token'];
+}
+// lru1 最老 → lru5 最新
+foreach ([1 => 100, 2 => 90, 3 => 80, 4 => 70, 5 => 60] as $i => $seconds) {
+    $pdo->prepare(
+        'UPDATE device_token SET created_at = DATE_SUB(NOW(), INTERVAL ? SECOND) WHERE device_id = ?'
+    )->execute([$seconds, "lru$i"]);
+}
+// lru1 / lru2 的 id 最小，若按 id 排序本应最先被淘汰 —— 现在让它们变成“最近用过”
+foreach ([1, 2] as $i) {
+    $id = (int) $pdo->query("SELECT id FROM device_token WHERE device_id='lru$i'")->fetchColumn();
+    device_token_touch($pdo, $id);
+}
+device_token_issue($pdo, 'user', 11, 'lru6', 'P6', $snap);
+ok('淘汰的是 lru3 而非 id 最小的 lru1（按 last_used 而非 id）',
+    device_token_resolve($pdo, $tk[3], 'lru3')['code'] === 'TOKEN_REVOKED');
+ok('最近用过的 lru1 保住', device_token_resolve($pdo, $tk[1], 'lru1')['ok']);
+ok('次老的 lru4 也未受影响', device_token_resolve($pdo, $tk[4], 'lru4')['ok']);
+
+// 淘汰只在同 kind 内发生：网页端记住我不受手机配额影响
+clean($pdo);
+$webKeep = device_token_issue($pdo, 'user', 11, 'webkeep', 'B', $snap, DEVICE_TOKEN_KIND_WEB, 30);
+for ($i = 1; $i <= 5; $i++) {
+    device_token_issue($pdo, 'user', 11, "m$i", "M$i", $snap);
+}
+device_token_issue($pdo, 'user', 11, 'm6', 'M6', $snap);
+ok('移动端淘汰不影响网页记住我',
+    device_token_resolve($pdo, $webKeep['token'], null, DEVICE_TOKEN_KIND_WEB)['ok']);
 
 echo "\n=== 7. 吊销 ===\n";
-ok('吊销 1 台返回 1', device_token_revoke($pdo, 'user', 11, 'dev1') === 1);
+// 自包含：不再依赖上一节的残留状态（否则第 6 节一改成淘汰，这里就连锁失败）
+clean($pdo);
+$rv1 = device_token_issue($pdo, 'user', 11, 'rev1', 'P1', $snap);
+$rv2 = device_token_issue($pdo, 'user', 11, 'rev2', 'P2', $snap);
+ok('前置：活跃数 2', device_token_count_active($pdo, 'user', 11) === 2);
+ok('吊销 1 台返回 1', device_token_revoke($pdo, 'user', 11, 'rev1') === 1);
 ok('被吊销 → TOKEN_REVOKED',
-    device_token_resolve($pdo, $tokens[1], 'dev1')['code'] === 'TOKEN_REVOKED');
-ok('活跃数降为 4', device_token_count_active($pdo, 'user', 11) === 4);
-$r7 = device_token_issue($pdo, 'user', 11, 'dev7', 'Phone 7', $snap);
-ok('腾出名额后可再签发', $r7['ok'], $r7['code'] ?? '');
-ok('全部吊销返回 5', device_token_revoke($pdo, 'user', 11, null) === 5);
+    device_token_resolve($pdo, $rv1['token'], 'rev1')['code'] === 'TOKEN_REVOKED');
+ok('活跃数降为 1', device_token_count_active($pdo, 'user', 11) === 1);
+ok('另一台不受影响', device_token_resolve($pdo, $rv2['token'], 'rev2')['ok']);
+ok('全部吊销返回 1', device_token_revoke($pdo, 'user', 11, null) === 1);
 ok('全吊销后活跃数为 0', device_token_count_active($pdo, 'user', 11) === 0);
-ok('全吊销后令牌不可用', !device_token_resolve($pdo, $r7['token'], 'dev7')['ok']);
+ok('全吊销后令牌不可用', !device_token_resolve($pdo, $rv2['token'], 'rev2')['ok']);
 
 echo "\n=== 8. 过期 ===\n";
 clean($pdo);
@@ -345,8 +392,9 @@ ok('设备列表只含指纹', count(device_token_list($pdo, 'user', 11)) === 5)
 ok('网页列表只含网页', count(device_token_list($pdo, 'user', 11, DEVICE_TOKEN_KIND_WEB)) === 3);
 $rWeb = device_token_issue($pdo, 'user', 11, 'web4', 'Browser', $snap, DEVICE_TOKEN_KIND_WEB, 30);
 ok('指纹满额时仍可新增网页记住我', $rWeb['ok'], $rWeb['code'] ?? '');
-ok('但第 6 台指纹仍被挡',
-    device_token_issue($pdo, 'user', 11, 'bio6', 'Phone 6', $snap)['code'] === 'DEVICE_LIMIT');
+ok('第 6 台指纹改为淘汰最久未用的（不再报 DEVICE_LIMIT）',
+    device_token_issue($pdo, 'user', 11, 'bio6', 'Phone 6', $snap)['ok']);
+ok('指纹仍稳定在 5 台', device_token_count_active($pdo, 'user', 11) === 5);
 
 // 网页 TTL 与移动端不同（30 天 vs 90 天）
 $webExp = $pdo->query("SELECT DATEDIFF(expires_at, NOW()) AS d FROM device_token WHERE device_id='web4'")->fetchColumn();
