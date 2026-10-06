@@ -425,8 +425,10 @@ export default function LoginPage() {
         fd.append("account_id", userField.toUpperCase().trim());
       } else {
         fd.append("login_id", userField.toUpperCase().trim());
-        if (rememberMe) fd.append("remember_me", "1");
       }
+      // member 也要传：后端已为 member / owner 实现 device_token 记住我
+      // （过去只对 user 生效，而前端连字段都不发，member 根本没有记住我）
+      if (rememberMe) fd.append("remember_me", "1");
 
       const res = await fetch(buildApiUrl("api/session/login_api.php"), {
         method: "POST",

@@ -57,11 +57,14 @@ try {
 }
 
 require_once $root . '/includes/device_token.php';
+require_once $root . '/includes/company_expiration.php';   // device_token_company_expired 依赖它
 
 echo "=== 0. 迁移文件可直接执行 ===\n";
+// 演练真实升级路径：先跑**不含 kind** 的基础迁移（模拟已存在的旧表），
+// 再由 ensure_kind_column() 自动补列，最后确认 kind 迁移脚本本身幂等。
 $sql = file_get_contents($migration);
 $pdo->exec($sql);
-ok('迁移文件执行成功', true);
+ok('基础迁移文件执行成功', true);
 $cols = $pdo->query("SHOW COLUMNS FROM device_token")->fetchAll(PDO::FETCH_COLUMN);
 foreach (['user_type', 'user_id', 'token_hash', 'device_id', 'device_name',
           'session_snapshot', 'expires_at', 'last_used_at', 'last_used_ip',
@@ -76,6 +79,45 @@ $enum = $pdo->query("SHOW COLUMNS FROM device_token LIKE 'user_type'")->fetch(PD
 ok('user_type 覆盖 owner/user/member 三种身份',
     strpos((string) $enum['Type'], "'owner'") !== false
     && strpos((string) $enum['Type'], "'member'") !== false);
+
+// 基础迁移不含 kind（升级前状态）
+ok('（前置）旧表尚无 kind 列', !in_array('kind', $cols, true));
+
+device_token_ensure_table($pdo);
+$colsAfter = $pdo->query("SHOW COLUMNS FROM device_token")->fetchAll(PDO::FETCH_COLUMN);
+ok('ensure_table 自动补上 kind 列', in_array('kind', $colsAfter, true));
+$kindCol = $pdo->query("SHOW COLUMNS FROM device_token LIKE 'kind'")->fetch(PDO::FETCH_ASSOC);
+ok('kind 默认值为 biometric', strpos((string) $kindCol['Default'], 'biometric') !== false);
+device_token_ensure_kind_column($pdo);
+ok('重复补列不报错（幂等）', true);
+
+// kind 迁移脚本自身幂等（列已存在时应跳过而不是 Duplicate column）
+$kindMigrationFile = $root . '/database/migrations/20261006_add_device_token_kind.sql';
+function run_sql_file(PDO $pdo, string $path): void
+{
+    $raw = file_get_contents($path);
+    $lines = array_filter(
+        array_map('trim', explode("\n", $raw)),
+        static fn($l) => $l !== '' && strpos($l, '--') !== 0
+    );
+    foreach (explode(';', implode("\n", $lines)) as $stmt) {
+        $stmt = trim($stmt);
+        if ($stmt === '') {
+            continue;
+        }
+        // 用 query() 而非 exec()：PREPARE/EXECUTE 会产生结果集，
+        // 不排空的话下一条会报 "other unbuffered queries are active"。
+        $res = $pdo->query($stmt);
+        if ($res instanceof PDOStatement) {
+            $res->fetchAll();
+            $res->closeCursor();
+        }
+    }
+}
+run_sql_file($pdo, $kindMigrationFile);
+ok('kind 迁移脚本在列已存在时可重复执行', true);
+run_sql_file($pdo, $kindMigrationFile);
+ok('kind 迁移脚本连续执行两次也不报错', true);
 
 // ── 桩表 ────────────────────────────────────────────────────────────
 $pdo->exec("CREATE TABLE owner (
@@ -276,6 +318,205 @@ ok('同 device_id 跨三种身份互不干扰', $n === 3, "实际 $n");
 ok('user 身份活跃数为 1', device_token_count_active($pdo, 'user', 11) === 1);
 ok('owner 身份活跃数为 1', device_token_count_active($pdo, 'owner', 7) === 1);
 ok('member 身份活跃数为 1', device_token_count_active($pdo, 'member', 21) === 1);
+
+echo "\n=== 15. kind 归一化 ===\n";
+ok('biometric 合法', device_token_normalize_kind('BIOMETRIC') === DEVICE_TOKEN_KIND_BIOMETRIC);
+ok('web 合法', device_token_normalize_kind('web') === DEVICE_TOKEN_KIND_WEB);
+ok('非法 kind → 空', device_token_normalize_kind('mobile') === '');
+ok('null kind → 空', device_token_normalize_kind(null) === '');
+
+$snapMember = ['user_id' => 21, 'user_type' => 'member', 'company_id' => 1, 'company_code' => 'C168'];
+$snapOwner  = ['user_id' => 7, 'user_type' => 'owner', 'company_id' => 1, 'company_code' => 'C168'];
+$snapUser11 = ['user_id' => 11, 'user_type' => 'user', 'company_id' => 2, 'company_code' => 'BANK'];
+$snapUser13 = ['user_id' => 13, 'user_type' => 'user', 'company_id' => 2, 'company_code' => 'BANK'];
+
+echo "\n=== 16. kind 隔离：网页记住我不占手机指纹配额 ===\n";
+clean($pdo);
+for ($i = 1; $i <= 5; $i++) {
+    device_token_issue($pdo, 'user', 11, "bio$i", "Phone $i", $snap);
+}
+ok('指纹已打满 5 台', device_token_count_active($pdo, 'user', 11) === 5);
+for ($i = 1; $i <= 3; $i++) {
+    device_token_issue($pdo, 'user', 11, "web$i", 'Browser', $snap, DEVICE_TOKEN_KIND_WEB, 30);
+}
+ok('网页记住我计入自己的配额', device_token_count_active($pdo, 'user', 11, DEVICE_TOKEN_KIND_WEB) === 3);
+ok('指纹配额仍为 5，未被网页占用', device_token_count_active($pdo, 'user', 11) === 5);
+ok('设备列表只含指纹', count(device_token_list($pdo, 'user', 11)) === 5);
+ok('网页列表只含网页', count(device_token_list($pdo, 'user', 11, DEVICE_TOKEN_KIND_WEB)) === 3);
+$rWeb = device_token_issue($pdo, 'user', 11, 'web4', 'Browser', $snap, DEVICE_TOKEN_KIND_WEB, 30);
+ok('指纹满额时仍可新增网页记住我', $rWeb['ok'], $rWeb['code'] ?? '');
+ok('但第 6 台指纹仍被挡',
+    device_token_issue($pdo, 'user', 11, 'bio6', 'Phone 6', $snap)['code'] === 'DEVICE_LIMIT');
+
+// 网页 TTL 与移动端不同（30 天 vs 90 天）
+$webExp = $pdo->query("SELECT DATEDIFF(expires_at, NOW()) AS d FROM device_token WHERE device_id='web4'")->fetchColumn();
+ok('网页记住我 TTL 约 30 天', (int) $webExp >= 29 && (int) $webExp <= 30, "实际 {$webExp}");
+$bioExp = $pdo->query("SELECT DATEDIFF(expires_at, NOW()) AS d FROM device_token WHERE device_id='bio1'")->fetchColumn();
+ok('指纹 TTL 约 90 天', (int) $bioExp >= 89 && (int) $bioExp <= 90, "实际 {$bioExp}");
+
+ok('非法 kind → BAD_KIND',
+    device_token_issue($pdo, 'user', 11, 'devKind', 'x', $snap, 'mobile')['code'] === 'BAD_KIND');
+
+ echo "\n=== 17. web 解析：无设备绑定 + kind 必须匹配 ===\n";
+clean($pdo);
+$wTok = device_token_issue($pdo, 'member', 21, 'webdev01', 'Browser', $snapMember, DEVICE_TOKEN_KIND_WEB, 30);
+$bTok = device_token_issue($pdo, 'member', 21, 'biodev01', 'Phone', $snapMember);
+ok('web 令牌不传 device_id 也能解析',
+    device_token_resolve($pdo, $wTok['token'], null, DEVICE_TOKEN_KIND_WEB)['ok']);
+ok('web 令牌传错 device_id 仍被拒（绑定校验没被取消）',
+    device_token_resolve($pdo, $wTok['token'], 'wrongdevice', DEVICE_TOKEN_KIND_WEB)['code'] === 'TOKEN_INVALID');
+ok('web 令牌当 biometric 查 → INVALID',
+    device_token_resolve($pdo, $wTok['token'], null, DEVICE_TOKEN_KIND_BIOMETRIC)['code'] === 'TOKEN_INVALID');
+ok('biometric 令牌当 web 查 → INVALID',
+    device_token_resolve($pdo, $bTok['token'], null, DEVICE_TOKEN_KIND_WEB)['code'] === 'TOKEN_INVALID');
+ok('不限 kind 时两者都能查到',
+    device_token_resolve($pdo, $bTok['token'], 'biodev01', null)['ok']
+    && device_token_resolve($pdo, $wTok['token'], null, null)['ok']);
+
+ echo "\n=== 18. revoke_by_token 只打中一条 ===\n";
+clean($pdo);
+$wA = device_token_issue($pdo, 'owner', 7, 'webA', 'A', $snapMember, DEVICE_TOKEN_KIND_WEB, 30);
+$wB = device_token_issue($pdo, 'owner', 7, 'webB', 'B', $snapMember, DEVICE_TOKEN_KIND_WEB, 30);
+ok('精确吐销返回 1', device_token_revoke_by_token($pdo, $wA['token'], DEVICE_TOKEN_KIND_WEB) === 1);
+ok('被吐销的那条已失效',
+    device_token_resolve($pdo, $wA['token'], null, DEVICE_TOKEN_KIND_WEB)['code'] === 'TOKEN_REVOKED');
+ok('**另一个浏览器不受影响**',
+    device_token_resolve($pdo, $wB['token'], null, DEVICE_TOKEN_KIND_WEB)['ok']);
+ok('重复吐销同一 token 返回 0',
+    device_token_revoke_by_token($pdo, $wA['token'], DEVICE_TOKEN_KIND_WEB) === 0);
+ok('非 hex 字符串不报错且返回 0', device_token_revoke_by_token($pdo, 'nothex') === 0);
+
+ echo "\n=== 19. 网页记住我签发（勾 / 不勾）===\n";
+clean($pdo);
+$postBackup = $_POST;
+$cookieBackup = $_COOKIE;
+$sessionBackup = $_SESSION;
+
+$_SESSION = [
+    'user_id' => 21, 'user_type' => 'member', 'role' => 'member',
+    'login_id' => 'ACC1', 'account_id' => 'ACC1',
+    'company_id' => 1, 'company_code' => 'C168',
+    'member_login_account_id' => 21, 'member_winloss_view_account_id' => 21,
+    'secondary_password_verified' => true,   // 必须被排除
+];
+$_COOKIE[DEVICE_TOKEN_WEB_COOKIE] = str_repeat('a', 32);
+$_POST['remember_me'] = '1';
+device_token_web_remember_issue($pdo, 'member', 21);
+$webRows = $pdo->query("SELECT kind, device_id, session_snapshot FROM device_token WHERE user_type='member'")->fetchAll(PDO::FETCH_ASSOC);
+ok('勾了记住我 → 建成一条 web 行', count($webRows) === 1 && $webRows[0]['kind'] === 'web', 'count=' . count($webRows));
+ok('绑定了浏览器 device_id', ($webRows[0]['device_id'] ?? '') === str_repeat('a', 32));
+$storedSnap = json_decode((string) ($webRows[0]['session_snapshot'] ?? ''), true);
+ok('快照含 member 专属键', ($storedSnap['member_login_account_id'] ?? null) === 21);
+ok('快照已排除二级密码标记', !array_key_exists('secondary_password_verified', (array) $storedSnap));
+
+// 同一浏览器重新登录 = 覆盖，不是新增
+$before = (int) $pdo->query("SELECT COUNT(*) FROM device_token WHERE kind='web'")->fetchColumn();
+device_token_web_remember_issue($pdo, 'member', 21);
+$after = (int) $pdo->query("SELECT COUNT(*) FROM device_token WHERE kind='web'")->fetchColumn();
+ok('同浏览器重复登录不新增行（uk_device）', $before === $after && $after === 1, "before=$before after=$after");
+
+// 不勾：精确吐销当前 cookie 那条
+$keep = device_token_issue($pdo, 'member', 21, str_repeat('b', 32), 'B', $snapMember, DEVICE_TOKEN_KIND_WEB, 30);
+$_COOKIE['remember_token'] = $keep['token'];
+unset($_POST['remember_me']);
+device_token_web_remember_issue($pdo, 'member', 21);
+ok('不勾记住我 → 当前 cookie 那条被吐销',
+    device_token_resolve($pdo, $keep['token'], null, DEVICE_TOKEN_KIND_WEB)['code'] === 'TOKEN_REVOKED');
+
+ echo "\n=== 20. 用 cookie 恢复会话（含安全底线）===\n";
+clean($pdo);
+$_SESSION = [
+    'user_id' => 7, 'user_type' => 'owner', 'role' => 'owner',
+    'login_id' => 'K', 'owner_id' => 7, 'real_owner_id' => 7, 'owner_code' => 'K',
+    'company_id' => 1, 'company_code' => 'C168',
+    'secondary_password_verified' => true,   // 故意带上，看会不会被快照带进去
+];
+$oTok = device_token_issue(
+    $pdo, 'owner', 7, str_repeat('c', 32), 'Browser',
+    device_token_capture_session(), DEVICE_TOKEN_KIND_WEB, 30
+);
+$preSnap = json_decode((string) $pdo->query("SELECT session_snapshot FROM device_token WHERE device_id='" . str_repeat('c', 32) . "'")->fetchColumn(), true);
+ok('（前置）快照本身不含二级密码标记', !array_key_exists('secondary_password_verified', (array) $preSnap));
+
+$_SESSION = [];
+$_COOKIE['remember_token'] = $oTok['token'];
+ok('恢复成功', device_token_try_restore_from_cookie($pdo) === true);
+ok('恢复出 owner 身份',
+    ($_SESSION['user_type'] ?? '') === 'owner' && (int) ($_SESSION['user_id'] ?? 0) === 7);
+ok('★ 恢复后仍无二级密码标记（网页记住我也不放行二级密码）',
+    !isset($_SESSION['secondary_password_verified']));
+ok('owner 专属字段已带回',
+    (int) ($_SESSION['owner_id'] ?? 0) === 7 && ($_SESSION['owner_code'] ?? '') === 'K');
+
+// 已吐销
+clean($pdo);
+$r2 = device_token_issue($pdo, 'owner', 7, str_repeat('d', 32), 'B', $snapOwner, DEVICE_TOKEN_KIND_WEB, 30);
+device_token_revoke_by_token($pdo, $r2['token'], DEVICE_TOKEN_KIND_WEB);
+$_SESSION = [];
+$_COOKIE['remember_token'] = $r2['token'];
+ok('已吐销 → 不恢复', device_token_try_restore_from_cookie($pdo) === false);
+
+// 已过期
+clean($pdo);
+$r3 = device_token_issue($pdo, 'owner', 7, str_repeat('e', 32), 'B', $snapOwner, DEVICE_TOKEN_KIND_WEB, 30);
+$pdo->exec("UPDATE device_token SET expires_at = DATE_SUB(NOW(), INTERVAL 1 DAY)");
+$_SESSION = [];
+$_COOKIE['remember_token'] = $r3['token'];
+ok('已过期 → 不恢复', device_token_try_restore_from_cookie($pdo) === false);
+
+// 快照与令牌身份不一致（防损坏 / 防被污染的快照被使用）
+clean($pdo);
+$mismatch = device_token_issue($pdo, 'owner', 7, str_repeat('7', 32), 'B', $snapMember, DEVICE_TOKEN_KIND_WEB, 30);
+$_SESSION = [];
+$_COOKIE['remember_token'] = $mismatch['token'];
+ok('快照 user_id 与令牌不符 → 不恢复', device_token_try_restore_from_cookie($pdo) === false);
+
+// C168 是平台自身：company_expiration.php 对它无条件 return 'valid'（过期也不拦）
+clean($pdo);
+$pdo->exec("UPDATE company SET expiration_date = '2020-01-01 00:00:00' WHERE id = 1");
+$rC168 = device_token_issue($pdo, 'member', 21, str_repeat('f', 32), 'B', $snapMember, DEVICE_TOKEN_KIND_WEB, 30);
+$_SESSION = [];
+$_COOKIE['remember_token'] = $rC168['token'];
+ok('C168 即使过期也放行（跟随 company_expiration 的既有豁免）',
+    device_token_try_restore_from_cookie($pdo) === true);
+
+// 非 C168 才是真正的过期拦截
+clean($pdo);
+$pdo->exec("UPDATE company SET expiration_date = '2020-01-01 00:00:00' WHERE id = 2");
+$r4 = device_token_issue($pdo, 'user', 11, str_repeat('8', 32), 'B', $snapUser11, DEVICE_TOKEN_KIND_WEB, 30);
+$_SESSION = [];
+$_COOKIE['remember_token'] = $r4['token'];
+ok('非 C168 公司已过期 → 不恢复', device_token_try_restore_from_cookie($pdo) === false);
+ok('（且未误清凭据，公司续期后仍可用）',
+    device_token_resolve($pdo, $r4['token'], null, DEVICE_TOKEN_KIND_WEB)['ok']);
+$pdo->exec("UPDATE company SET expiration_date = '2099-01-01 00:00:00' WHERE id = 2");
+
+// 账号被停用（快照必须与令牌身份一致，否则会先卡在不一致检查上）
+clean($pdo);
+$pdo->exec("UPDATE user SET status='inactive' WHERE id=13");
+$r5 = device_token_issue($pdo, 'user', 13, str_repeat('0', 32), 'B', $snapUser13, DEVICE_TOKEN_KIND_WEB, 30);
+$_SESSION = [];
+$_COOKIE['remember_token'] = $r5['token'];
+ok('账号已停用 → 不恢复', device_token_try_restore_from_cookie($pdo) === false);
+ok('停用账号的令牌被顺手吐销',
+    device_token_resolve($pdo, $r5['token'], null, DEVICE_TOKEN_KIND_WEB)['code'] === 'TOKEN_REVOKED');
+$pdo->exec("UPDATE user SET status='active' WHERE id=13");
+
+// 指纹令牌不能被网页路径认领
+clean($pdo);
+$bioOnly = device_token_issue($pdo, 'owner', 7, str_repeat('9', 32), 'Phone', $snapOwner);
+$_SESSION = [];
+$_COOKIE['remember_token'] = $bioOnly['token'];
+ok('指纹令牌不能当网页记住我用', device_token_try_restore_from_cookie($pdo) === false);
+
+$_SESSION = [];
+unset($_COOKIE['remember_token']);
+ok('无 cookie → 不恢复', device_token_try_restore_from_cookie($pdo) === false);
+
+// 还原超全局
+$_POST = $postBackup;
+$_COOKIE = $cookieBackup;
+$_SESSION = $sessionBackup;
 
 // 收尾：不把测试库留在机器上
 $rootPdo->exec("DROP DATABASE IF EXISTS `$dbName`");

@@ -17,6 +17,8 @@ try {
     require_once __DIR__ . '/../../includes/session_user_payload_cache.php';
     require_once __DIR__ . '/../../includes/auth_invalidation.php';
     require_once __DIR__ . '/../../includes/maintenance_gate.php';
+    require_once __DIR__ . '/../../includes/company_expiration.php';
+    require_once __DIR__ . '/../../includes/device_token.php';
 } catch (Throwable $e) {
     // Do not fail bootstrap because of DB wiring errors; session data is still enough for routing.
     error_log('current_user_api config load failed: ' . $e->getMessage());
@@ -59,11 +61,28 @@ if (!isset($_SESSION['user_id']) && isset($_COOKIE['remember_token']) && $pdo in
             if (!empty($user['password'])) {
                 auth_store_password_fingerprint((string) $user['password']);
             }
-        } else {
-            setcookie('remember_token', '', time() - 3600, "/", "", false, true);
         }
+        // 查不到 user 时**不在这里清 cookie** —— owner / member 还要靠同一个
+        // cookie 走下面的 device_token 回退（见 ② ）。清了回退就拿不到 cookie 了。
     } catch (Throwable $e) {
         error_log('current_user_api remember token failed: ' . $e->getMessage());
+    }
+
+    // ── ② 回退：owner / member 的 device_token（kind='web'）──────────────────
+    // 这两种身份此前完全没有可用的记住我：owner 是空壳分支
+    // （login_api.php 里 if ($remember_me) { /* 注释 */ }），account 表根本没有
+    // remember_token 那一列。放在旧路径**之后**，user 身份行为完全不变。
+    if (!isset($_SESSION['user_id'])) {
+        try {
+            device_token_try_restore_from_cookie($pdo);
+        } catch (Throwable $e) {
+            error_log('current_user_api device token restore failed: ' . $e->getMessage());
+        }
+    }
+
+    // ── ③ 两个机制都没认出来，才清 cookie ───────────────────────────
+    if (!isset($_SESSION['user_id']) && isset($_COOKIE['remember_token'])) {
+        setcookie('remember_token', '', time() - 3600, "/", "", false, true);
     }
 }
 

@@ -20,8 +20,20 @@
 /** 令牌有效期（天） */
 const DEVICE_TOKEN_TTL_DAYS = 90;
 
-/** 同一账号最多可授权的设备数 */
+/** 同一账号最多可授权的设备数（**只统计移动端指纹**，网页端记住我不占额度） */
 const DEVICE_TOKEN_MAX_DEVICES = 5;
+
+/** 移动端指纹解锁 */
+const DEVICE_TOKEN_KIND_BIOMETRIC = 'biometric';
+
+/** 网页端「记住我」 */
+const DEVICE_TOKEN_KIND_WEB = 'web';
+
+/** 网页端记住我有效期（天）。比移动端短：cookie 更易被复制 */
+const DEVICE_TOKEN_WEB_TTL_DAYS = 30;
+
+/** 网页端浏览器标识 cookie（非机密，只为让不同浏览器各自一条记录，而不是互相覆盖） */
+const DEVICE_TOKEN_WEB_COOKIE = 'ec_web_device';
 
 /** 会话快照体积上限；超出则丢弃数组值（防某个账号的租户列表把行撑爆） */
 const DEVICE_TOKEN_SNAPSHOT_MAX_BYTES = 65536;
@@ -74,6 +86,14 @@ function device_token_normalize_user_type(?string $userType): string
     return in_array($t, ['owner', 'user', 'member'], true) ? $t : '';
 }
 
+/** 归一化 kind，非法值返回 '' */
+function device_token_normalize_kind(?string $kind): string
+{
+    $k = strtolower(trim((string) $kind));
+
+    return in_array($k, [DEVICE_TOKEN_KIND_BIOMETRIC, DEVICE_TOKEN_KIND_WEB], true) ? $k : '';
+}
+
 /** 幂等建表（仓库已有同款先例：api/domain/domain_api.php:501） */
 function device_token_ensure_table(PDO $pdo): void
 {
@@ -88,6 +108,7 @@ function device_token_ensure_table(PDO $pdo): void
             "CREATE TABLE IF NOT EXISTS `device_token` (
               `id`               bigint unsigned NOT NULL AUTO_INCREMENT,
               `user_type`        enum('owner','user','member') NOT NULL,
+              `kind`             varchar(20) NOT NULL DEFAULT 'biometric',
               `user_id`          int NOT NULL,
               `token_hash`       char(64) NOT NULL,
               `device_id`        varchar(64) NOT NULL,
@@ -101,11 +122,45 @@ function device_token_ensure_table(PDO $pdo): void
               PRIMARY KEY (`id`),
               UNIQUE KEY `uk_token_hash` (`token_hash`),
               UNIQUE KEY `uk_device` (`user_type`,`user_id`,`device_id`),
-              KEY `idx_user` (`user_type`,`user_id`,`revoked_at`)
+              KEY `idx_user` (`user_type`,`user_id`,`revoked_at`),
+              KEY `idx_kind_user` (`kind`,`user_type`,`user_id`,`revoked_at`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
         );
     } catch (Throwable $e) {
         error_log('device_token_ensure_table failed: ' . $e->getMessage());
+    }
+
+    // 已存在的表不会被上面的 CREATE IF NOT EXISTS 补列
+    device_token_ensure_kind_column($pdo);
+}
+
+/**
+ * 幂等补 `kind` 列（旧表升级用）。
+ *
+ * 只在列缺失时 ALTER，且每个请求最多试一次 —— 仓库里已有同款先例：
+ * api/includes/auto_renew.php:384 的 auto_renew_ensure_request_table_columns()。
+ */
+function device_token_ensure_kind_column(PDO $pdo): void
+{
+    static $done = false;
+    if ($done) {
+        return;
+    }
+    $done = true;
+
+    try {
+        $stmt = $pdo->query("SHOW COLUMNS FROM `device_token` LIKE 'kind'");
+        if ($stmt !== false && $stmt->fetch(PDO::FETCH_ASSOC)) {
+            return;
+        }
+        $pdo->exec(
+            "ALTER TABLE `device_token`
+               ADD COLUMN `kind` varchar(20) NOT NULL DEFAULT 'biometric' AFTER `user_id`,
+               ADD KEY `idx_kind_user` (`kind`,`user_type`,`user_id`,`revoked_at`)"
+        );
+    } catch (Throwable $e) {
+        // 列已存在 / 无 ALTER 权限都不应阻断登录
+        error_log('device_token_ensure_kind_column: ' . $e->getMessage());
     }
 }
 
@@ -244,14 +299,14 @@ function device_token_restore_session(array $snapshot): void
 }
 
 /** 当前账号已授权的设备数（未吊销且未过期） */
-function device_token_count_active(PDO $pdo, string $userType, int $userId): int
+function device_token_count_active(PDO $pdo, string $userType, int $userId, string $kind = DEVICE_TOKEN_KIND_BIOMETRIC): int
 {
     try {
         $stmt = $pdo->prepare(
             'SELECT COUNT(*) FROM device_token
-             WHERE user_type = ? AND user_id = ? AND revoked_at IS NULL AND expires_at > NOW()'
+             WHERE user_type = ? AND user_id = ? AND kind = ? AND revoked_at IS NULL AND expires_at > NOW()'
         );
-        $stmt->execute([$userType, $userId]);
+        $stmt->execute([$userType, $userId, $kind]);
 
         return (int) $stmt->fetchColumn();
     } catch (Throwable $e) {
@@ -273,15 +328,22 @@ function device_token_issue(
     int $userId,
     string $deviceId,
     ?string $deviceName,
-    array $snapshot
+    array $snapshot,
+    string $kind = DEVICE_TOKEN_KIND_BIOMETRIC,
+    int $ttlDays = DEVICE_TOKEN_TTL_DAYS
 ): array {
     $userType = device_token_normalize_user_type($userType);
     if ($userType === '' || $userId <= 0) {
         return ['ok' => false, 'code' => 'BAD_PRINCIPAL'];
     }
+    $kind = device_token_normalize_kind($kind);
+    if ($kind === '') {
+        return ['ok' => false, 'code' => 'BAD_KIND'];
+    }
     if (!device_token_is_valid_device_id($deviceId)) {
         return ['ok' => false, 'code' => 'BAD_DEVICE_ID'];
     }
+    $ttlDays = max(1, min(365, $ttlDays));
 
     $encoded = device_token_encode_snapshot($snapshot);
     if ($encoded === null) {
@@ -291,12 +353,15 @@ function device_token_issue(
     // 已有同设备记录时不占新名额
     try {
         $stmt = $pdo->prepare(
-            'SELECT id FROM device_token WHERE user_type = ? AND user_id = ? AND device_id = ? LIMIT 1'
+            'SELECT id FROM device_token
+             WHERE user_type = ? AND user_id = ? AND device_id = ? AND kind = ? LIMIT 1'
         );
-        $stmt->execute([$userType, $userId, $deviceId]);
+        $stmt->execute([$userType, $userId, $deviceId, $kind]);
         $existing = $stmt->fetchColumn();
 
-        if ($existing === false && device_token_count_active($pdo, $userType, $userId) >= DEVICE_TOKEN_MAX_DEVICES) {
+        // 配额只看同 kind：网页端记住我不能占掉手机的 5 台指纹额度
+        if ($existing === false
+            && device_token_count_active($pdo, $userType, $userId, $kind) >= DEVICE_TOKEN_MAX_DEVICES) {
             return ['ok' => false, 'code' => 'DEVICE_LIMIT'];
         }
 
@@ -304,10 +369,11 @@ function device_token_issue(
         $hash = device_token_hash($plain);
         $stmt = $pdo->prepare(
             'INSERT INTO device_token
-                (user_type, user_id, token_hash, device_id, device_name, session_snapshot, expires_at)
-             VALUES (?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? DAY))
+                (user_type, kind, user_id, token_hash, device_id, device_name, session_snapshot, expires_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? DAY))
              ON DUPLICATE KEY UPDATE
                 token_hash       = VALUES(token_hash),
+                kind             = VALUES(kind),
                 device_name      = VALUES(device_name),
                 session_snapshot = VALUES(session_snapshot),
                 expires_at       = VALUES(expires_at),
@@ -317,18 +383,20 @@ function device_token_issue(
         );
         $stmt->execute([
             $userType,
+            $kind,
             $userId,
             $hash,
             $deviceId,
             $deviceName !== null && $deviceName !== '' ? mb_substr($deviceName, 0, 100) : null,
             $encoded,
-            DEVICE_TOKEN_TTL_DAYS,
+            $ttlDays,
         ]);
 
         $stmt = $pdo->prepare(
-            'SELECT expires_at FROM device_token WHERE user_type = ? AND user_id = ? AND device_id = ? LIMIT 1'
+            'SELECT expires_at FROM device_token
+             WHERE user_type = ? AND user_id = ? AND device_id = ? AND kind = ? LIMIT 1'
         );
-        $stmt->execute([$userType, $userId, $deviceId]);
+        $stmt->execute([$userType, $userId, $deviceId, $kind]);
 
         return [
             'ok'         => true,
@@ -348,12 +416,27 @@ function device_token_issue(
  *
  * @return array{ok:bool,code:string,row?:array<string,mixed>}
  */
-function device_token_resolve(PDO $pdo, string $plainToken, string $deviceId): array
-{
+/**
+ * 校验令牌。
+ *
+ * @param string|null $deviceId 移动端传设备 id 做绑定校验；**网页端传 null 跳过绑定**
+ *                              （浏览器没有移动端那种稳定设备标识）
+ * @param string|null $kind     null = 不限；否则只接受该 kind
+ * @return array{ok:bool,code:string,row?:array<string,mixed>}
+ */
+function device_token_resolve(
+    PDO $pdo,
+    string $plainToken,
+    ?string $deviceId = null,
+    ?string $kind = null
+): array {
     if (!preg_match('/^[0-9a-f]{64}$/', $plainToken)) {
         return ['ok' => false, 'code' => 'TOKEN_INVALID'];
     }
-    if (!device_token_is_valid_device_id($deviceId)) {
+    if ($deviceId !== null && !device_token_is_valid_device_id($deviceId)) {
+        return ['ok' => false, 'code' => 'TOKEN_INVALID'];
+    }
+    if ($kind !== null && device_token_normalize_kind($kind) === '') {
         return ['ok' => false, 'code' => 'TOKEN_INVALID'];
     }
     try {
@@ -366,7 +449,11 @@ function device_token_resolve(PDO $pdo, string $plainToken, string $deviceId): a
         if (!$row) {
             return ['ok' => false, 'code' => 'TOKEN_INVALID'];
         }
-        if (!hash_equals((string) $row['device_id'], $deviceId)) {
+        if ($deviceId !== null && !hash_equals((string) $row['device_id'], $deviceId)) {
+            return ['ok' => false, 'code' => 'TOKEN_INVALID'];
+        }
+        // kind 列缺失时按 biometric 处理，避免旧表未升级就卡死移动端
+        if ($kind !== null && (string) ($row['kind'] ?? DEVICE_TOKEN_KIND_BIOMETRIC) !== $kind) {
             return ['ok' => false, 'code' => 'TOKEN_INVALID'];
         }
         if (!empty($row['revoked_at'])) {
@@ -404,27 +491,35 @@ function device_token_touch(PDO $pdo, int $id): void
  *
  * @return int 受影响行数
  */
-function device_token_revoke(PDO $pdo, string $userType, int $userId, ?string $deviceId = null): int
-{
+function device_token_revoke(
+    PDO $pdo,
+    string $userType,
+    int $userId,
+    ?string $deviceId = null,
+    ?string $kind = null
+): int {
     $userType = device_token_normalize_user_type($userType);
     if ($userType === '' || $userId <= 0) {
         return 0;
     }
+    if ($kind !== null && device_token_normalize_kind($kind) === '') {
+        return 0;
+    }
 
     try {
-        if ($deviceId === null || $deviceId === '') {
-            $stmt = $pdo->prepare(
-                'UPDATE device_token SET revoked_at = NOW()
-                 WHERE user_type = ? AND user_id = ? AND revoked_at IS NULL'
-            );
-            $stmt->execute([$userType, $userId]);
-        } else {
-            $stmt = $pdo->prepare(
-                'UPDATE device_token SET revoked_at = NOW()
-                 WHERE user_type = ? AND user_id = ? AND device_id = ? AND revoked_at IS NULL'
-            );
-            $stmt->execute([$userType, $userId, $deviceId]);
+        $where = 'user_type = ? AND user_id = ? AND revoked_at IS NULL';
+        $params = [$userType, $userId];
+        if ($deviceId !== null && $deviceId !== '') {
+            $where .= ' AND device_id = ?';
+            $params[] = $deviceId;
         }
+        if ($kind !== null) {
+            $where .= ' AND kind = ?';
+            $params[] = $kind;
+        }
+
+        $stmt = $pdo->prepare("UPDATE device_token SET revoked_at = NOW() WHERE $where");
+        $stmt->execute($params);
 
         return $stmt->rowCount();
     } catch (Throwable $e) {
@@ -439,7 +534,7 @@ function device_token_revoke(PDO $pdo, string $userType, int $userId, ?string $d
  *
  * @return list<array<string,mixed>>
  */
-function device_token_list(PDO $pdo, string $userType, int $userId): array
+function device_token_list(PDO $pdo, string $userType, int $userId, string $kind = DEVICE_TOKEN_KIND_BIOMETRIC): array
 {
     $userType = device_token_normalize_user_type($userType);
     if ($userType === '' || $userId <= 0) {
@@ -451,10 +546,10 @@ function device_token_list(PDO $pdo, string $userType, int $userId): array
             'SELECT id, device_id, device_name, expires_at, last_used_at, revoked_at, created_at,
                     (revoked_at IS NULL AND expires_at > NOW()) AS is_active
              FROM device_token
-             WHERE user_type = ? AND user_id = ?
+             WHERE user_type = ? AND user_id = ? AND kind = ?
              ORDER BY is_active DESC, last_used_at DESC, created_at DESC'
         );
-        $stmt->execute([$userType, $userId]);
+        $stmt->execute([$userType, $userId, $kind]);
 
         return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     } catch (Throwable $e) {
@@ -525,6 +620,12 @@ function device_token_company_expired(PDO $pdo, array $snapshot): bool
     $companyId = isset($snapshot['company_id']) ? (int) $snapshot['company_id'] : 0;
     $companyCode = trim((string) ($snapshot['company_code'] ?? ''));
 
+    // 缺依赖就退回「未过期」：过期在 login / session_check 另有强制点，
+    // 而这里误判为已过期会让记住我彻底不可用（比漏抦一个已过期公司更糟）。
+    if (!function_exists('gc_is_company_expiration_blocking')) {
+        return false;
+    }
+
     try {
         if ($companyId <= 0) {
             // Group 登录：company_id 为 null，用 groups 表判定
@@ -554,4 +655,198 @@ function device_token_company_expired(PDO $pdo, array $snapshot): bool
         // 查不出来时按「已过期」处理，故障安全
         return true;
     }
+}
+
+/**
+ * 按明文令牌精确吐销一条（登出 / 取消记住我用）。
+ *
+ * 与 device_token_revoke() 的区别：后者按「账号」刷一片，这个只打中当前 cookie
+ * 对应的那一条，所以不会把用户其它浏览器的记住我一起干掉。
+ */
+function device_token_revoke_by_token(PDO $pdo, string $plainToken, ?string $kind = null): int
+{
+    if (!preg_match('/^[0-9a-f]{64}$/', $plainToken)) {
+        return 0;
+    }
+
+    try {
+        $sql = 'UPDATE device_token SET revoked_at = NOW() WHERE token_hash = ? AND revoked_at IS NULL';
+        $params = [device_token_hash($plainToken)];
+        if ($kind !== null) {
+            $sql .= ' AND kind = ?';
+            $params[] = $kind;
+        }
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+
+        return $stmt->rowCount();
+    } catch (Throwable $e) {
+        error_log('device_token_revoke_by_token failed: ' . $e->getMessage());
+
+        return 0;
+    }
+}
+
+/**
+ * 网页端浏览器标识（非机密）。
+ *
+ * 为何要单独一个 cookie：uk_device 是 (user_type,user_id,device_id)。
+ * 若每次登录用随机 id，同账号会堆出无数行；若都用固定值，则不同浏览器互相覆盖
+ * —— 那正是现有 user.remember_token 单列的老毛病（见方案文档事实 #7）。
+ * per-browser 稳定 id 是这里唯一合适的选择。
+ */
+function device_token_web_device_id(): string
+{
+    $existing = strtolower(trim((string) ($_COOKIE[DEVICE_TOKEN_WEB_COOKIE] ?? '')));
+    if (preg_match('/^[0-9a-f]{32}$/', $existing)) {
+        return $existing;
+    }
+
+    $id = bin2hex(random_bytes(16));
+    if (!headers_sent()) {
+        $params = session_get_cookie_params();
+        setcookie(DEVICE_TOKEN_WEB_COOKIE, $id, [
+            'expires' => time() + (400 * 24 * 60 * 60),
+            'path' => '/',
+            'domain' => $params['domain'] ?: '',
+            'secure' => function_exists('auth_cookie_secure_flag') ? auth_cookie_secure_flag() : true,
+            'httponly' => true,
+            'samesite' => 'Lax',
+        ]);
+    }
+
+    return $id;
+}
+
+/** 设备名，仅用于日后在「登录设备」里区分浏览器 */
+function device_token_web_device_name(): string
+{
+    $ua = trim((string) ($_SERVER['HTTP_USER_AGENT'] ?? ''));
+
+    return mb_substr($ua !== '' ? $ua : 'Web browser', 0, 100);
+}
+
+/**
+ * 网页端「记住我」。供 api/session/login_api.php 在 owner / member 分支的响应前调用。
+ *
+ * - 勾了：签发一条 kind='web' 的令牌并写 remember_token cookie
+ * - 没勾：只吐销当前 cookie 对应的那一条并清 cookie
+ *
+ * 全程吞异常：记住我失败绝不能把登录本身搞挂。
+ * 只在 owner / member 调用 —— user 身份走旧的 user.remember_token 列，保持原样不动。
+ */
+function device_token_web_remember_issue(PDO $pdo, string $userType, int $userId): void
+{
+    try {
+        $userType = device_token_normalize_user_type($userType);
+        if ($userType === '' || $userId <= 0) {
+            return;
+        }
+
+        $existing = (string) ($_COOKIE['remember_token'] ?? '');
+
+        if (empty($_POST['remember_me'])) {
+            if ($existing !== '') {
+                device_token_revoke_by_token($pdo, $existing, DEVICE_TOKEN_KIND_WEB);
+            }
+            if (function_exists('clear_remember_token_cookie')) {
+                clear_remember_token_cookie();
+            }
+
+            return;
+        }
+
+        $issued = device_token_issue(
+            $pdo,
+            $userType,
+            $userId,
+            device_token_web_device_id(),
+            device_token_web_device_name(),
+            device_token_capture_session(),
+            DEVICE_TOKEN_KIND_WEB,
+            DEVICE_TOKEN_WEB_TTL_DAYS
+        );
+
+        if (!$issued['ok']) {
+            error_log('device_token_web_remember_issue: ' . $issued['code']);
+
+            return;
+        }
+
+        $ttlSeconds = DEVICE_TOKEN_WEB_TTL_DAYS * 86400;
+        if (headers_sent()) {
+            // 响应已开始输出，cookie 写不进去了。正常登录流程有 ob_start，不会走到这。
+            error_log('device_token_web_remember_issue: headers already sent, cookie skipped');
+
+            return;
+        }
+        if (function_exists('auth_set_remember_token_cookie')) {
+            auth_set_remember_token_cookie($issued['token'], $ttlSeconds);
+        } else {
+            setcookie('remember_token', $issued['token'], time() + $ttlSeconds, '/');
+        }
+    } catch (Throwable $e) {
+        error_log('device_token_web_remember_issue failed: ' . $e->getMessage());
+    }
+}
+
+/**
+ * 用 remember_token cookie 恢复会话（网页端免登录），只处理 kind='web'。
+ *
+ * user 身份的旧路径（user.remember_token 明文列）由 current_user_api.php 自行处理并
+ * **保留原样**；本函数是它之后追加的回退，服务 owner / member —— 这两种身份此前
+ * 完全没有可用的记住我（owner 是空壳分支，account 表根本没那一列）。
+ *
+ * @return bool 是否成功恢复
+ */
+function device_token_try_restore_from_cookie(PDO $pdo): bool
+{
+    $plain = (string) ($_COOKIE['remember_token'] ?? '');
+    if ($plain === '') {
+        return false;
+    }
+
+    $resolved = device_token_resolve($pdo, $plain, null, DEVICE_TOKEN_KIND_WEB);
+    if (!$resolved['ok']) {
+        // 永久失效就清掉 cookie，避免每次引导都白查一次
+        if (function_exists('clear_remember_token_cookie')) {
+            clear_remember_token_cookie();
+        }
+
+        return false;
+    }
+
+    $row = $resolved['row'];
+    $userType = device_token_normalize_user_type((string) $row['user_type']);
+    $userId = (int) $row['user_id'];
+    if ($userType === '' || $userId <= 0) {
+        return false;
+    }
+
+    $snapshot = json_decode((string) ($row['session_snapshot'] ?? ''), true);
+    if (!is_array($snapshot) || (int) ($snapshot['user_id'] ?? 0) !== $userId) {
+        return false;
+    }
+
+    $principal = device_token_fetch_principal($pdo, $userType, $userId);
+    if ($principal === null || strtolower($principal['status']) !== 'active') {
+        device_token_revoke_by_token($pdo, $plain, DEVICE_TOKEN_KIND_WEB);
+
+        return false;
+    }
+    if (device_token_company_expired($pdo, $snapshot)) {
+        return false;
+    }
+
+    // 快照里永远不会有 secondary_password_verified（见 device_token_excluded_session_keys），
+    // 所以恢复后二级密码仍会被强制要求。
+    device_token_restore_session($snapshot);
+    if ((int) ($_SESSION['user_id'] ?? 0) !== $userId
+        || (string) ($_SESSION['user_type'] ?? '') !== $userType) {
+        return false;
+    }
+
+    device_token_touch($pdo, (int) $row['id']);
+
+    return true;
 }

@@ -38,6 +38,7 @@ require_once __DIR__ . '/../../includes/session_user_payload_cache.php';
     require_once __DIR__ . '/../../includes/group_tenant_v2.php';
     require_once __DIR__ . '/../../includes/company_expiration.php';
     require_once __DIR__ . '/../../includes/auth_invalidation.php';
+    require_once __DIR__ . '/../../includes/device_token.php';
 } catch (Throwable $e) {
     ob_clean();
     echo json_encode(['status' => 'error', 'message' => 'Database connection failed']);
@@ -177,6 +178,7 @@ try {
 
             persist_login_filter_scope($pdo, $company_id);
             $loginFilter = resolve_login_identifier_scope($pdo, $company_id);
+            device_token_web_remember_issue($pdo, 'member', (int) $account['id']);
             echo json_encode([
                 'status' => 'success',
                 'redirect' => '/member',
@@ -508,6 +510,7 @@ try {
                 auth_store_password_fingerprint($passwordForFingerprint);
                 gt_v2_apply_group_login_session($groupRow, $company_id);
                 $loginFilter = resolve_login_identifier_scope($pdo, $company_id);
+                device_token_web_remember_issue($pdo, 'owner', (int) $owner['id']);
                 echo json_encode([
                     'status' => 'success',
                     'redirect' => '/owner-secondary-password',
@@ -603,16 +606,13 @@ try {
             $_SESSION['last_activity'] = time();
             unset($_SESSION['secondary_password_verified']);
 
-            // 处理Remember Me (Owner也支持记住我功能)
-            $remember_me = isset($_POST['remember_me']) ? $_POST['remember_me'] : false;
-            if ($remember_me) {
-                // Owner 的 remember me 可以存在 session 或另外处理
-            }
+            // remember-me 统一在响应前由 device_token_web_remember_issue() 处理（原先是空壳分支）
 
             auth_store_password_fingerprint($passwordForFingerprint);
 
             persist_login_filter_scope($pdo, $company_id);
             $loginFilter = resolve_login_identifier_scope($pdo, $company_id);
+            device_token_web_remember_issue($pdo, 'owner', (int) $owner['id']);
             echo json_encode([
                 'status' => 'success',
                 'redirect' => '/owner-secondary-password',
@@ -659,6 +659,7 @@ try {
                 auth_store_password_fingerprint($passwordForFingerprint);
                 gt_v2_apply_group_login_session($groupRow, $company_id);
                 $loginFilter = resolve_login_identifier_scope($pdo, $company_id);
+                device_token_web_remember_issue($pdo, 'owner', (int) $owner['id']);
                 echo json_encode([
                     'status' => 'success',
                     'redirect' => '/owner-secondary-password',
