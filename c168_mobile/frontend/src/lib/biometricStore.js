@@ -207,3 +207,38 @@ export async function clearToken() {
     /* 已经是清空状态 */
   }
 }
+
+/**
+ * 给「可能卡住的本地/原生调用」加超时。
+ *
+ * 为什么必须有：启动门禁检查凭据时会 await 原生插件（SecureStorage）。
+ * 插件不响应（旧 APK 里没装、桥接异常等）时，这个 await **永远不会 settle**，
+ * 门禁就永久停在“检查登录状态…” —— 整个 App 卡死，连密码登录都进不去。
+ * 这是实机上报过的问题。宁可当成“没有凭据”回退到密码登录，也不能卡住。
+ *
+ * @param {Promise<*>} promise
+ * @param {number} ms
+ * @returns {Promise<*>} 超时或出错都返回 null
+ */
+export function withTimeout(promise, ms) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (value) => {
+      if (settled) return;
+      settled = true;
+      resolve(value ?? null);
+    };
+
+    const timer = setTimeout(() => done(null), ms);
+
+    Promise.resolve(promise)
+      .then((value) => {
+        clearTimeout(timer);
+        done(value);
+      })
+      .catch(() => {
+        clearTimeout(timer);
+        done(null);
+      });
+  });
+}

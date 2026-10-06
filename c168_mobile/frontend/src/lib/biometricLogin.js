@@ -8,7 +8,7 @@
  * 浏览器不适用这里：那边走 WebAuthn passkey，见 lib/webauthn.js。
  */
 
-import { authenticate, getDeviceId, loadToken } from "./biometricStore.js";
+import { authenticate, getDeviceId, loadToken, withTimeout } from "./biometricStore.js";
 import { loginWithDeviceToken } from "./deviceTokenApi.js";
 
 /**
@@ -28,8 +28,9 @@ export async function nativeBiometricLogin() {
   }
 
   // ② 本地凭据（Keystore 失效时 loadToken 会返回 null）
-  const token = await loadToken();
-  if (!token) {
+  // 加超时：插件不响应时不能让调用方永远转圈
+  const token = await withTimeout(loadToken(), 4000);
+  if (typeof token !== "string" || !token) {
     return { ok: false, stage: "credential", code: "NO_CREDENTIAL", message: "" };
   }
 

@@ -13,7 +13,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { clearToken, getDeviceId, isNative } from "../lib/biometricStore.js";
+import {
+  clearToken,
+  getDeviceId,
+  isNative,
+  loadToken,
+  withTimeout,
+} from "../lib/biometricStore.js";
 import { nativeBiometricLogin } from "../lib/biometricLogin.js";
 
 export const GATE_CHECKING = "checking";
@@ -122,18 +128,30 @@ export function useBiometricUnlock() {
 
     let cancelled = false;
     (async () => {
-      const token = await loadToken();
+      // 超时保护：原生插件不响应时 loadToken 会永远不 settle，
+      // 那样门禁会永久停在“检查登录状态…”。超时当成“没凭据”处理。
+      const token = await withTimeout(loadToken(), 4000);
       if (cancelled) return;
-      if (!token) {
-        setState(GATE_DISABLED);
-        return;
-      }
-      setState(GATE_LOCKED);
+      setState(typeof token === "string" && token ? GATE_LOCKED : GATE_DISABLED);
     })();
 
     return () => {
       cancelled = true;
     };
+  }, [state]);
+
+  /**
+   * 兑底看门狗：不管检查流程因为什么原因没走完，都不能把 App 永久卡住。
+   * 5 秒后仍未离开 checking 就直接当成“无凭据”，放行到密码登录。
+   * 这是对“实机卡在 checking session”这类问题的硬保障。
+   */
+  useEffect(() => {
+    if (state !== GATE_CHECKING) return undefined;
+    const timer = setTimeout(() => {
+      setState((prev) => (prev === GATE_CHECKING ? GATE_DISABLED : prev));
+    }, 5000);
+
+    return () => clearTimeout(timer);
   }, [state]);
 
   // 进入锁屏后自动弹一次指纹
