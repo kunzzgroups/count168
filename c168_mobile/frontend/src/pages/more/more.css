@@ -8,6 +8,13 @@
 .m-more-page--settings {
   display: flex;
   flex-direction: column;
+  /*
+   * 必须给卡片之间留间距：这个容器原先**没有任何 gap**，而
+   * .m-more-settings-group 也没有 margin，于是两张卡片是完全贴合的
+   * （实测 gap0=0 gap1=0），只靠圆角和阴影勉强区分，看起来像一整块被硬切开。
+   * 0.85rem 与 .m-more-profile 的 gap 一致，沿用页面已有的节奏。
+   */
+  gap: 0.85rem;
   box-sizing: border-box;
   min-height: calc(100dvh - env(safe-area-inset-top, 0px) - var(--m-inset-t, 0px) - 6.5rem - var(--m-shell-main-pad-bottom));
 }
@@ -110,7 +117,8 @@
 /* 设置行下方的说明文字 */
 .m-more-settings-hint {
   margin: 0;
-  padding: 0 0.9rem 0.7rem;
+  /* 顶部给一点内边距：原来只有 0，说明文字紧贴着上行标题（实测观感很挤） */
+  padding: 0.15rem 0.9rem 0.8rem;
   color: var(--m-color-muted);
   font-size: var(--m-text-small);
   line-height: 1.5;
