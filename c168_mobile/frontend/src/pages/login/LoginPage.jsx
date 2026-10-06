@@ -16,6 +16,7 @@ import {
   saveToken,
 } from "../../lib/biometricStore.js";
 import { registerDeviceToken } from "../../lib/deviceTokenApi.js";
+import { readLastCompanyId, writeLastCompanyId } from "../../lib/lastLoginPrefs.js";
 
 const LOGIN_ASSET_RETRY_KEY = "ec_mobile_login_asset_retry";
 
@@ -175,7 +176,9 @@ export default function LoginPage() {
   const roleFromUrl = searchParams.get("role") === "member" ? "member" : "admin";
 
   const [role, setRole] = useState(roleFromUrl);
-  const companyField = useUppercaseField("");
+  // 只读一次 localStorage；写成 useState 初始化器是为了不在每次渲染都读
+  const [initialCompany] = useState(() => readLastCompanyId());
+  const companyField = useUppercaseField(initialCompany);
   const userIdField = useUppercaseField("");
   const companyId = companyField.value;
   const userField = userIdField.value;
@@ -454,6 +457,9 @@ export default function LoginPage() {
 
       if (data.status === "success" && data.redirect) {
         sessionStorage.removeItem(LOGIN_ASSET_RETRY_KEY);
+        // 记住公司 ID：iOS 钥匙串只有 username + password 两个槽位，
+        // 这个第三字段系统不保存，不本地记住的话每次都要手输。
+        writeLastCompanyId(companyId);
         const redirect = String(data.redirect || "").trim();
         if (/owner[-_]secondary[-_]password/i.test(redirect) || redirect === "/owner-secondary-password") {
           navigate("/owner-secondary-password", { replace: true });
