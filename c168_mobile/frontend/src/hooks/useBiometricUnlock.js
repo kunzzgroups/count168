@@ -73,8 +73,8 @@ export function useBiometricUnlock() {
     setBusy(true);
     setFailure(null);
     try {
-      // 1) 系统生物识别
-      await authenticate("验证指纹以登录 EazyCount");
+      // 1) 系统生物识别（文案与语言在 biometricStore.authenticate 里统一处理）
+      await authenticate();
 
       // 2) 取出 Keystore 里的令牌
       const token = await loadToken();

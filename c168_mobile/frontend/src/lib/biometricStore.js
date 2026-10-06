@@ -21,6 +21,7 @@
 import { Capacitor } from "@capacitor/core";
 import { BiometricAuth, BiometryType } from "@aparajita/capacitor-biometric-auth";
 import { SecureStorage } from "@aparajita/capacitor-secure-storage";
+import { readLoginLang } from "./loginLang.js";
 
 /**
  * 安全存储的 key 前缀，必须与其它插件隔离。
@@ -131,17 +132,30 @@ export function getDeviceName() {
 /**
  * 弹出生物识别。成功 resolve，失败/取消 reject。
  *
- * @param {string} reason 弹窗文案
+ * ⚠️ 千万不要再加 androidTitle / androidSubtitle —— 两个都试过，都会造成重复显示：
+ *
+ *   1. androidTitle：省略时插件默认用 “Fingerprint Authentication” / “Face Authentication”
+ *      这类名称（BiometricAuthNative.java 的 biometryNameMap）；而系统本来就会在弹窗顶部
+ *      显示应用名。传 "EazyCount" 会让它出现两次。
+ *   2. androidSubtitle：在安卓上它与 reason 是**两个不同位置** ——
+ *      AuthActivity.java:72 是 setTitle(title).setSubtitle(subtitle).setDescription(reason)。
+ *      传同一个字符串就会上下显示两遍（实机截图确认过）。
+ *
+ * 所以只传 reason（安卓上用作文案，iOS 上是必填的 localizedReason）。
  */
-export async function authenticate(reason) {
+export async function authenticate() {
+  const lang = readLoginLang();
+  const reason =
+    lang === "zh"
+      ? "验证指纹以登录 EazyCount"
+      : "Verify your fingerprint to sign in to EazyCount";
+
   await BiometricAuth.authenticate({
     reason,
-    cancelTitle: "Cancel",
+    cancelTitle: lang === "zh" ? "取消" : "Cancel",
     // 不允许用锁屏密码兜底：这里要的是「生物识别」本身，
     // 允许设备凭据会让「指纹解锁」名不副实。
     allowDeviceCredential: false,
-    androidTitle: "EazyCount",
-    androidSubtitle: reason,
   });
 }
 
