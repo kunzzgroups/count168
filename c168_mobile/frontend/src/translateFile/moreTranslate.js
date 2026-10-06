@@ -18,6 +18,14 @@ export const MORE_I18N = {
       "Turn on to sign in with Face ID or your fingerprint instead of typing the password.",
     bioEnableFailed: "Could not enable biometric unlock.",
     bioDeviceLimit: "Could not enable biometric unlock. Please try again.",
+    // resolver 给出的“当前为什么用不了”—— 必须是用户能行动的一句话
+    bioReasonNotEnrolled:
+      "No fingerprint or face is set up for apps on this phone. Add one in your phone's settings first.",
+    bioReasonLocked: "Biometrics are temporarily locked after too many attempts. Try again shortly.",
+    bioReasonFingerprintGone:
+      "Fingerprint is no longer set up on this phone. Choose face instead, or add a fingerprint back.",
+    bioReasonFaceGone:
+      "Face is no longer available on this phone. Choose fingerprint instead, or set face up again.",
     bioPasskeys: "Passkeys",
     // 安卓专用：让用户选指纹还是人脸（见 lib/biometricSettings.js 的 readBiometricSettings）
     //
@@ -78,6 +86,12 @@ export const MORE_I18N = {
     bioModalityFingerprint: "指纹",
     bioModalityFace: "人脸或指纹",
     bioModality: "解锁方式",
+    // resolver 给出的“当前为什么用不了”—— 必须是用户能行动的一句话
+    bioReasonNotEnrolled:
+      "这台手机里还没有可供 App 使用的指纹或人脸，请先在系统设置里添加一个。",
+    bioReasonLocked: "系统已临时锁定生物识别（失败次数过多），请稍后再试。",
+    bioReasonFingerprintGone: "这台手机已经没有指纹了。可以改用人脸，或重新录入指纹。",
+    bioReasonFaceGone: "这台手机已经没有人脸识别了。可以改用指纹，或重新录入人脸。",
     bioOpenInSafari: "在 Safari 中打开",
     bioEnabledHint: "用指纹 / 人脸直接登录",
     bioDisabledHint: "开启后用指纹 / 人脸登录，不必再输密码。",

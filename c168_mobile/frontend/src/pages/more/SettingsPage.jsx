@@ -74,6 +74,13 @@ export default function SettingsPage() {
   const [bioModality, setBioModality] = useState(() => ensureSettings(false).method);
   const [bioError, setBioError] = useState("");
   /**
+   * resolver 给出的“当前为什么用不了”（可行动的原因）。
+   * 为何需要它：设备没录入任何生物识别时，开关仍然显示 On，
+   * 但什么都不做也不解释 —— 用户只能反复试（实机截图里
+   * weak=0 strong=0 就是这个情形）。
+   */
+  const [bioReason, setBioReason] = useState("");
+  /**
    * ⚠️ 临时诊断：**每次改动必须递增这个号**。
    *
    * 为何需要它：iOS 主屏幕应用 / 安卓 WebView 会把 JS 留在内存里，
@@ -83,7 +90,7 @@ export default function SettingsPage() {
    *
    * 初始值故意非空：如果连这一行都不显示，那就不是探测失败而是**包没更新**。
    */
-  const BIO_BUILD = "b20";
+  const BIO_BUILD = "b21";
   const [bioDiag, setBioDiag] = useState("boot");
   const i18n = useMemo(() => MORE_I18N[lang] || MORE_I18N.en, [lang]);
 
@@ -225,6 +232,7 @@ export default function SettingsPage() {
         if (cancelled) return;
         setBioEnabled(settings.enabled);
         setBioModality(settings.method);
+        setBioReason(plan.reason || "");
         setBioDiag(
           `enabled=${settings.enabled ? 1 : 0} method=${settings.method} capability=${
             r.capability?.state || CAP.UNKNOWN
@@ -336,8 +344,20 @@ export default function SettingsPage() {
   // 产品也明确不要「30 天免登录」这种替代品，所以标题固定。
   const bioLabel = i18n.biometric;
 
-  const companyCode = String(me?.company_code || me?.company_id || "").toUpperCase();
-  const groupId = String(me?.login_group_id || me?.login_identifier || "").toUpperCase();
+  // 把 resolver 的原因翻成一句**用户能行动**的话。
+  // 内部原因（NO_CREDENTIAL）不在这里说 —— 那个由登录页的开启引导负责。
+  const bioReasonText =
+    bioReason === "NOT_ENROLLED"
+      ? i18n.bioReasonNotEnrolled
+      : bioReason === "LOCKED"
+        ? i18n.bioReasonLocked
+        : bioReason === "FINGERPRINT_UNAVAILABLE"
+          ? i18n.bioReasonFingerprintGone
+          : bioReason === "FACE_UNAVAILABLE"
+            ? i18n.bioReasonFaceGone
+            : "";
+
+  const companyCode = String(me?.company_code || me?.company_id || "").toUpperCase();  const groupId = String(me?.login_group_id || me?.login_identifier || "").toUpperCase();
   const displayName = me?.nickname || me?.username || me?.name || "—";
   const role = String(me?.role || me?.user_type || "").toUpperCase();
   const scopeLabel = [companyCode, groupId].filter(Boolean).join(" · ");
@@ -462,6 +482,11 @@ export default function SettingsPage() {
                 功能稳下来后连同 BIO_BUILD 一起删。 */}
             {bioDiag ? (
               <p className="m-more-settings-hint">{`[${BIO_BUILD}] ${bioDiag}`}</p>
+            ) : null}
+
+            {/* 当前用不了时，给一句用户能行动的话（不是报错，是状态） */}
+            {bioReasonText ? (
+              <p className="m-more-settings-hint">{bioReasonText}</p>
             ) : null}
 
             {/* 只在真的出错时提示一行 */}
