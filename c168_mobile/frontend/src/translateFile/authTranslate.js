@@ -103,6 +103,9 @@ export const LOGIN_I18N = {
     bioLater: "Not now",
     bioEnableFailed: "Could not enable biometric unlock.",
     bioDeviceLimit: "Could not enable biometric unlock. Please try again.",
+    passkeyLogin: "Sign in with Face ID / fingerprint",
+    passkeyWorking: "Waiting for biometric…",
+    passkeyFailed: "Could not sign in with biometrics.",
   },
   zh: {
     admin: "管理员",
@@ -132,6 +135,9 @@ export const LOGIN_I18N = {
     bioLater: "暂不开启",
     bioEnableFailed: "开启生物识别解锁失败。",
     bioDeviceLimit: "开启生物识别解锁失败，请重试。",
+    passkeyLogin: "用 Face ID / 指纹登录",
+    passkeyWorking: "等待生物识别…",
+    passkeyFailed: "生物识别登录失败。",
   },
 };
 

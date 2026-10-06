@@ -842,3 +842,27 @@ body.bg .sc-login-input::placeholder {
   color: var(--login-muted);
 }
 
+
+/* 「用 Face ID / 指纹登录」（WebAuthn passkey）—— 次按钮，与主登录按钮区分开 */
+.sc-login-passkey-btn {
+  display: flex;
+  width: 100%;
+  min-height: var(--login-submit-height, 48px);
+  margin-top: 0.6rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border: 1px solid rgba(13, 96, 255, 0.35);
+  border-radius: var(--login-radius-pill, 999px);
+  background: transparent;
+  color: var(--m-color-primary-soft-text, #1d4ed8);
+  font-family: inherit;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.sc-login-passkey-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

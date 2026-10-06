@@ -19,6 +19,13 @@ import {
   saveToken,
 } from "../../lib/biometricStore.js";
 import { registerDeviceToken, revokeDeviceToken } from "../../lib/deviceTokenApi.js";
+import {
+  createPasskey,
+  listPasskeys,
+  platformAuthenticatorAvailable,
+  removeAllPasskeys,
+  webauthnSupported,
+} from "../../lib/webauthn.js";
 import "./more.css";
 
 function initials(name) {
@@ -42,6 +49,11 @@ export default function SettingsPage() {
   const [bioTypeLabel, setBioTypeLabel] = useState("");
   const [bioBusy, setBioBusy] = useState(false);
   const [bioError, setBioError] = useState("");
+  const [pkSupported, setPkSupported] = useState(false);
+  const [pkCount, setPkCount] = useState(0);
+  const [pkMax, setPkMax] = useState(0);
+  const [pkBusy, setPkBusy] = useState(false);
+  const [pkError, setPkError] = useState("");
   const i18n = useMemo(() => MORE_I18N[lang] || MORE_I18N.en, [lang]);
 
   const setLang = useCallback((next) => {
@@ -135,6 +147,60 @@ export default function SettingsPage() {
     [bioEnabled, i18n.bioDeviceLimit, i18n.bioEnableFailed],
   );
 
+  // passkey（WebAuthn）探测 + 已注册数量。安卓 APK 的 WebView 不支持 WebAuthn，
+  // 所以那边这一栏不会出现 —— 它是留给 iPhone / 桌面浏览器的。
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const supported = webauthnSupported() && (await platformAuthenticatorAvailable());
+      if (cancelled) return;
+      setPkSupported(supported);
+      if (!supported) return;
+      const listed = await listPasskeys();
+      if (cancelled) return;
+      setPkCount(listed.count || 0);
+      setPkMax(listed.max || 0);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleAddPasskey = useCallback(async () => {
+    setPkBusy(true);
+    setPkError("");
+    try {
+      const result = await createPasskey(getDeviceName());
+      if (!result.ok) {
+        // 用户主动取消不算错误，不要弹红字吓人
+        if (result.code !== "NotAllowedError" && result.code !== "CANCELLED") {
+          setPkError(result.message || i18n.passkeyAddFailed || "Could not add a passkey.");
+        }
+        return;
+      }
+      const listed = await listPasskeys();
+      setPkCount(listed.count || 0);
+      setPkMax(listed.max || 0);
+    } finally {
+      setPkBusy(false);
+    }
+  }, [i18n.passkeyAddFailed]);
+
+  const handleRemovePasskeys = useCallback(async () => {
+    setPkBusy(true);
+    setPkError("");
+    try {
+      const result = await removeAllPasskeys();
+      if (!result.ok) {
+        setPkError(result.message || i18n.passkeyRemoveFailed || "Could not remove.");
+        return;
+      }
+      setPkCount(0);
+    } finally {
+      setPkBusy(false);
+    }
+  }, [i18n.passkeyRemoveFailed]);
+
   const companyCode = String(me?.company_code || me?.company_id || "").toUpperCase();
   const groupId = String(me?.login_group_id || me?.login_identifier || "").toUpperCase();
   const displayName = me?.nickname || me?.username || me?.name || "—";
@@ -198,7 +264,7 @@ export default function SettingsPage() {
               </div>
             </section>
 
-          <section className="m-more-settings-group" aria-label={i18n.biometric || "Fingerprint unlock"}>
+          <section className="m-more-settings-group" aria-label={i18n.biometric || "Biometric Unlock"}>
             <div className="m-more-settings-row">
               <span>{i18n.biometric || "Fingerprint unlock"}</span>
               {/* 开关始终渲染：位置要能看到。浏览器 / 旧 APK 上置灰，由下方说明解释原因 */}
@@ -230,6 +296,45 @@ export default function SettingsPage() {
               </p>
             ) : null}
           </section>
+
+          {/* passkey 是另一种登录方式（服务端公钥认证），不是「给本地凭据加把锁」，
+              所以单独一张卡片，不与上面的 Biometric Unlock 混在一起。 */}
+          {pkSupported ? (
+            <section className="m-more-settings-group" aria-label={i18n.passkey || "Face ID / Passkey"}>
+              <div className="m-more-settings-row">
+                <span>{i18n.passkey || "Face ID / Passkey"}</span>
+                {pkBusy ? (
+                  <i className="fas fa-spinner fa-spin" aria-hidden="true" />
+                ) : pkCount > 0 ? (
+                  <button
+                    type="button"
+                    className="m-more-settings-link m-more-settings-link--danger"
+                    onClick={() => void handleRemovePasskeys()}
+                  >
+                    {i18n.passkeyRemove || "Remove"}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="m-more-settings-link"
+                    onClick={() => void handleAddPasskey()}
+                  >
+                    {i18n.passkeyRegister || "Add"}
+                  </button>
+                )}
+              </div>
+              <p className="m-more-settings-hint">
+                {pkCount > 0
+                  ? `${i18n.passkeyRegistered || "Registered"} · ${pkCount}/${pkMax}`
+                  : i18n.passkeyHintOff || ""}
+              </p>
+              {pkError ? (
+                <p className="m-more-settings-hint m-more-settings-hint--error" role="alert">
+                  {pkError}
+                </p>
+              ) : null}
+            </section>
+          ) : null}
 
             <button type="button" className="m-more-logout tap-scale" onClick={() => void logout()}>
               <i className="fas fa-right-from-bracket" aria-hidden="true" />

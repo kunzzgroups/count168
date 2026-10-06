@@ -17,6 +17,11 @@ import {
 } from "../../lib/biometricStore.js";
 import { registerDeviceToken } from "../../lib/deviceTokenApi.js";
 import { readLastCompanyId, writeLastCompanyId } from "../../lib/lastLoginPrefs.js";
+import {
+  loginWithPasskey,
+  platformAuthenticatorAvailable,
+  webauthnSupported,
+} from "../../lib/webauthn.js";
 
 const LOGIN_ASSET_RETRY_KEY = "ec_mobile_login_asset_retry";
 
@@ -188,6 +193,8 @@ export default function LoginPage() {
   const [modal, setModal] = useState({ open: false, title: "Notice", message: "" });
   const [enroll, setEnroll] = useState({ open: false, targetPath: "", busy: false, error: "" });
   const [submitting, setSubmitting] = useState(false);
+  const [pkAvailable, setPkAvailable] = useState(false);
+  const [pkBusy, setPkBusy] = useState(false);
   const [lang, setLang] = useState(() => readLoginLang());
 
   const verifyTimeoutRef = useRef(null);
@@ -366,7 +373,42 @@ export default function LoginPage() {
     [enroll.targetPath, i18n.bioDeviceLimit, i18n.bioEnableFailed, navigate],
   );
 
+  /**
+   * 用 passkey（Face ID / 指纹）登录。
+   * 必须定义在 finishLogin / showNotice **之后** —— 依赖数组在渲染时求值，
+   * 放前面会撞上 const 的暂时性死区。
+   */
+  const handlePasskeyLogin = useCallback(async () => {
+    setPkBusy(true);
+    try {
+      const result = await loginWithPasskey();
+      if (!result.ok) {
+        // 用户取消不提示：那是主动放弃，不是失败
+        if (result.code !== "NotAllowedError" && result.code !== "CANCELLED") {
+          showNotice(result.message || i18n.passkeyFailed);
+        }
+        return;
+      }
+      await finishLogin(result.redirect || "/dashboard");
+    } finally {
+      setPkBusy(false);
+    }
+  }, [finishLogin, i18n.passkeyFailed, showNotice]);
   useAuthBackground();
+
+  // 「用 Face ID / 指纹登录」入口：只在浏览器支持 WebAuthn 且存在平台验证器时出现。
+  // 安卓 APK 的 WebView 不支持 WebAuthn，所以那边不会显示（它走指纹解锁那条路）。
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!webauthnSupported()) return;
+      const available = await platformAuthenticatorAvailable();
+      if (!cancelled) setPkAvailable(available);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const ac = new AbortController();
@@ -615,6 +657,18 @@ export default function LoginPage() {
                 <button type="submit" className="sc-login-btn sc-login-submit-btn" disabled={submitting}>
                   <span>{submitting ? i18n.loggingIn : i18n.login}</span>
                 </button>
+
+                {pkAvailable ? (
+                  <button
+                    type="button"
+                    className="sc-login-passkey-btn"
+                    onClick={() => void handlePasskeyLogin()}
+                    disabled={submitting || pkBusy}
+                  >
+                    <i className="fas fa-fingerprint" aria-hidden="true" />
+                    <span>{pkBusy ? i18n.passkeyWorking : i18n.passkeyLogin}</span>
+                  </button>
+                ) : null}
 
                 <div className="sc-login-lang-ios-wrap">
                   <div

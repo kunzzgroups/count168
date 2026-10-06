@@ -297,3 +297,68 @@ challenge 必须一次性、短时效、服务端存储。用 `$_SESSION` 即可
    - 后者 → 只能做 B
 2. 桌面端登录要不要一起升级成 Passkey？（这是 B 的额外价值）
 3. 能不能接受"com 注册的 passkey 在 org/site 上无效、需各自注册"？
+
+---
+
+## 12. 实施记录（已完成）
+
+> 本文档的 §9「建议暂缓」已被产品方决定推翻：**做了**。
+> 采用 §5 的**路线 2（手写最小 ES256）**，未引入 composer。
+
+### 交付物
+
+| 文件 | 说明 |
+|---|---|
+| \`includes/webauthn.php\` | 密码学核心：base64url、迷你 CBOR、COSE→PEM、签名归一化、rpId/origin 推导、authData 解析、一次性 challenge、凭据存储 |
+| \`api/session/webauthn_register_options_api.php\` | 注册第 1 步：下发 challenge + rp + excludeCredentials |
+| \`api/session/webauthn_register_verify_api.php\` | 注册第 2 步：验 attestationObject（**fmt 必须是 none**）→ 存公钥 |
+| \`api/session/webauthn_login_options_api.php\` | 登录第 1 步：下发 challenge（未登录可访问） |
+| \`api/session/webauthn_login_verify_api.php\` | 登录第 2 步：验签 → 建会话（响应与 login_api 同构） |
+| \`api/session/webauthn_credentials_api.php\` | 查询 / 账号级移除 |
+| \`database/migrations/20261006_add_webauthn_credential.sql\` | 建表 |
+| \`scripts/test-webauthn.php\` | **73 项断言**，不需要浏览器与数据库 |
+| \`c168_mobile/frontend/src/lib/webauthn.js\` | 前端封装（base64url↔ArrayBuffer、两次 ceremony） |
+
+### 为什么敢手写密码学（范围被刻意收窄）
+
+- 注册请求 \`attestation: "none"\` → **完全不解析 attestation 证书链**
+- **只接受 ES256**，不做算法协商；\`pubKeyCredParams\` 也只声明 -7
+- 因此 CBOR 只需读两个小结构：attestationObject 顶层 map + COSE 公钥 map
+
+### 测试为什么不是自证
+
+签名由 **openssl 独立生成**，被测代码只负责验。如果 CBOR / COSE→PEM / 签名归一化 /
+\`authData || sha256(clientDataJSON)\` 拼接有任何一处写错，验签就会失败。
+其中「裸 r||s → DER」的用例是：先用 openssl 签出 DER，反解成裸 64 字节，
+再用被测函数转回 DER，最后交给 openssl 验通 —— 真正验证了转换器。
+
+### 安全要点（逐条实现并测试）
+
+| 项 | 实现 |
+|---|---|
+| challenge 一次性 | \`wa_challenge_consume()\` **取出即 unset**，且校验 purpose，注册/登录不能互用 |
+| origin 精确匹配 | 只与推导出的允许集合逐字节比对；**钓鱼子域、前缀假域、其它域名全部拒绝**（有专门断言） |
+| rpIdHash | 必须等于 \`sha256(rp_id)\` |
+| UP / UV | 都必须置位（我们请求 \`userVerification: required\`） |
+| AT | 注册时必须有；登录时不需要 |
+| attStmt | **\`fmt !== none\` 一律拒绝** —— 因为不校验它，接受就等于把未验证的声明当真 |
+| signCount | 单调性检查（新旧都为 0 时放行，因平台验证器恒返回 0） |
+| 二级密码 | 复用 \`DEVICE_TOKEN_TRUSTED_SKIPS_SECONDARY\`，与指纹解锁同一策略 |
+| 维护模式 / 公司过期 / 账号停用 | 与 \`login_api\`、\`device_login_api\` 同语义 |
+
+### 与手机 App 的关系（两套机制并存）
+
+| 客户端 | 机制 |
+|---|---|
+| 安卓 APK | \`device_token\`（本地凭据 + 生物识别门禁）—— **WebAuthn 在安卓 WebView 里不可用** |
+| iPhone Safari / PWA | WebAuthn（本次新增） |
+| 桌面浏览器 | WebAuthn（本次新增） |
+
+前端用 \`webauthnSupported() && platformAuthenticatorAvailable()\` 决定是否显示入口，
+所以 APK 内不会出现这个按钮。
+
+### 遗留 / 已知限制
+
+- **RP ID 按域名隔离**：com 注册的 passkey 在 org/site 上无效，需各自注册（与三库独立一致）
+- \`excludeCredentials\` 已用于阻止同一验证器重复注册
+- 未做「任意吊销单条凭据」，只有账号级移除（多一个入口就多一份越权面）
