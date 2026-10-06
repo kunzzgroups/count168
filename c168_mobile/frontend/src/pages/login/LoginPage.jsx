@@ -15,12 +15,10 @@ import {
   loadToken,
   saveToken,
 } from "../../lib/biometricStore.js";
-import { nativeBiometricLogin } from "../../lib/biometricLogin.js";
 import { registerDeviceToken } from "../../lib/deviceTokenApi.js";
 import { readLastCompanyId, writeLastCompanyId } from "../../lib/lastLoginPrefs.js";
 import {
-  loginWithPasskey,
-  passkeyErrorMessage,
+  startConditionalPasskeyLogin,
   webauthnSupported,
 } from "../../lib/webauthn.js";
 
@@ -199,9 +197,6 @@ export default function LoginPage() {
   const [modal, setModal] = useState({ open: false, title: "Notice", message: "" });
   const [enroll, setEnroll] = useState({ open: false, targetPath: "", busy: false, error: "" });
   const [submitting, setSubmitting] = useState(false);
-  // 生物识别登录入口："native"（APK 指纹）/ "web"（WebAuthn passkey）/ "none"
-  const [bioMode, setBioMode] = useState("none");
-  const [bioBusy, setBioBusy] = useState(false);
   const [lang, setLang] = useState(() => readLoginLang());
 
   const verifyTimeoutRef = useRef(null);
@@ -385,44 +380,41 @@ export default function LoginPage() {
    * 必须定义在 finishLogin / showNotice **之后** —— 依赖数组在渲染时求值，
    * 放前面会撞上 const 的暂时性死区。
    */
-  const handleBioLogin = useCallback(async () => {
-    setBioBusy(true);
-    try {
-      const result =
-        bioMode === "native" ? await nativeBiometricLogin() : await loginWithPasskey();
-      if (!result.ok) {
-        // 带原因/错误码地提示 —— 只显示“失败”会让用户和我都无从而适
-        showNotice(passkeyErrorMessage(lang, result.code, i18n.bioFailed));
-        return;
-      }
-      await finishLogin(result.redirect || "/dashboard");
-    } finally {
-      setBioBusy(false);
-    }
-  }, [bioMode, finishLogin, i18n.bioFailed, lang, showNotice]);
   useAuthBackground();
 
-  // 登录页的生物识别入口。两端判据不同，但对用户是同一个按钮：
-  //   原生（APK）—— 本地还存着凭据才值得显示（否则没什么可用）
-  //   浏览器 —— 只要支持 WebAuthn 就显示。
-  //
-  // ⚠️ 浏览器端**不再**用 platformAuthenticatorAvailable() 当门槛：它在 iOS 上会给
-  // 假阴性（用户实际能注册并登录 passkey，该探测却返回 false），结果按钮直接不出现。
-  // 宁可显示按钮，让实际尝试时的错误说清楚原因。
+  /**
+   * 登录页**不放任何生物识别按钮**（产品要求）。
+   *
+   * 改为启动「条件式调解」：把 passkey 交给系统的自动填充栏，
+   * 用户点一下账号栏就会被提示用 Face ID / 指纹登录 —— 页面上没有任何多余控件。
+   *
+   * 为什么不能“页面加载就弹生物识别”：WebAuthn 要求用户手势，平台会直接拒绕，
+   * 这一点在 iOS 和安卓浏览器上都一样。能自动弹的是**原生 APK**，
+   * 那由启动门禁（BiometricLockGate）负责，不在这里做。
+   *
+   * 不支持 / 没凭据 / 用户改用输入 —— 全部静默，绝不影响正常登录。
+   */
   useEffect(() => {
+    if (isNative()) return undefined;          // APK 走启动门禁，这里不做
+    if (!webauthnSupported()) return undefined;
+
+    const ac = new AbortController();
     let cancelled = false;
     (async () => {
-      if (isNative()) {
-        const stored = await loadToken();
-        if (!cancelled) setBioMode(stored ? "native" : "none");
-        return;
+      try {
+        const result = await startConditionalPasskeyLogin({ signal: ac.signal });
+        if (cancelled || !result.ok) return;
+        await finishLogin(result.redirect || "/dashboard");
+      } catch {
+        /* 用户没选凭据 / 中断 —— 不必提示，正常输入即可 */
       }
-      if (!cancelled) setBioMode(webauthnSupported() ? "web" : "none");
     })();
+
     return () => {
       cancelled = true;
+      ac.abort();
     };
-  }, []);
+  }, [finishLogin]);
 
   useEffect(() => {
     const ac = new AbortController();
@@ -671,18 +663,6 @@ export default function LoginPage() {
                 <button type="submit" className="sc-login-btn sc-login-submit-btn" disabled={submitting}>
                   <span>{submitting ? i18n.loggingIn : i18n.login}</span>
                 </button>
-
-                {bioMode !== "none" ? (
-                  <button
-                    type="button"
-                    className="sc-login-passkey-btn"
-                    onClick={() => void handleBioLogin()}
-                    disabled={submitting || bioBusy}
-                  >
-                    <i className="fas fa-fingerprint" aria-hidden="true" />
-                    <span>{bioBusy ? i18n.bioWorking : i18n.bioLogin}</span>
-                  </button>
-                ) : null}
 
                 <div className="sc-login-lang-ios-wrap">
                   <div

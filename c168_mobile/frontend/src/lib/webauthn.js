@@ -275,6 +275,77 @@ export async function createPasskey(deviceName) {
   return { ok: true };
 }
 
+/**
+ * 登录页用：启动「条件式调解」（autofill）的 passkey 登录。**不需要按钮**。
+ *
+ * 为什么不能用「页面加载就弹生物识别」：WebAuthn 要求**用户手势**才能调用，
+ * 平台会直接拒绝。条件式调解是平台提供的唯一无按钮方案 —— 它把 passkey 交给
+ * 系统的自动填充栏（iOS 的键盘上方 / 安卓的 autofill），用户点一下账号栏就会
+ * 被提示用 Face ID / 指纹登录。
+ *
+ * 这个 Promise 会一直挂着直到用户真的选了凭据（或中断）。
+ * 不支持 / 没凭据 / 用户输密码 —— 一律静默返回，绝不干扰正常登录。
+ *
+ * @returns {Promise<{ok:boolean, redirect?:string, code?:string, message?:string}>}
+ */
+export async function startConditionalPasskeyLogin({ signal } = {}) {
+  if (!webauthnSupported()) {
+    return { ok: false, code: "UNSUPPORTED" };
+  }
+
+  // 能力探测：不支持条件式调解就直接放弃（不要抛给调用方）
+  try {
+    const fn = window.PublicKeyCredential?.isConditionalMediationAvailable;
+    if (typeof fn !== "function") return { ok: false, code: "UNSUPPORTED" };
+    if ((await fn.call(window.PublicKeyCredential)) !== true) {
+      return { ok: false, code: "UNSUPPORTED" };
+    }
+  } catch {
+    return { ok: false, code: "UNSUPPORTED" };
+  }
+
+  const { json: opt } = await postForm("api/session/webauthn_login_options_api.php");
+  if (!opt?.success) {
+    return { ok: false, code: opt?.code || "OPTIONS_FAILED", message: opt?.message || "" };
+  }
+
+  let assertion = null;
+  try {
+    assertion = await navigator.credentials.get({
+      // 用户没选凭据时会被 abort 掉，不该当成错误上报
+      signal,
+      mediation: "conditional",
+      publicKey: {
+        challenge: b64urlToBytes(opt.challenge),
+        rpId: opt.rpId,
+        timeout: opt.timeout,
+        userVerification: opt.userVerification,
+        allowCredentials: [],
+      },
+    });
+  } catch (err) {
+    return { ok: false, code: err?.name || "CANCELLED", message: "" };
+  }
+
+  const response = assertion?.response;
+  if (!response) {
+    return { ok: false, code: "NO_ASSERTION", message: "" };
+  }
+
+  const { json } = await postForm("api/session/webauthn_login_verify_api.php", {
+    credential_id: bytesToB64url(assertion.rawId),
+    client_data_json: bytesToB64url(response.clientDataJSON),
+    authenticator_data: bytesToB64url(response.authenticatorData),
+    signature: bytesToB64url(response.signature),
+    user_handle: response.userHandle ? bytesToB64url(response.userHandle) : "",
+  });
+
+  if (json?.status !== "success") {
+    return { ok: false, code: json?.code || "VERIFY_FAILED", message: json?.message || "" };
+  }
+  return { ok: true, redirect: json.redirect || "/dashboard" };
+}
+
 /* ── 用 passkey 登录 ────────────────────────────────────────── */
 
 /**

@@ -15,8 +15,19 @@
  * 不要在这上面继续加。
  */
 
-/** 支持的最大时钟偏移（秒）：验证 clientDataJSON 里的 challenge 不做时间校验， 但保留常量以便将来加 */
+/** 挑战有效期（秒）。 */
 const WA_CHALLENGE_TTL = 300;
+
+/**
+ * 按用途取挑战有效期。
+ *
+ * 登录用得更长：条件式调解（autofill）下，挑战是在页面加载时就下发的，
+ * 而用户可能要过一会儿才在自动填充栏里点凭据 —— 5 分钟很容易不够。
+ */
+function wa_challenge_ttl(string $purpose): int
+{
+    return $purpose === 'login' ? 900 : WA_CHALLENGE_TTL;
+}
 
 /** 公钥 PEM 只允许这些开头，防止把任意内容写进库后被当成密钥用 */
 const WA_PEM_PREFIX = '-----BEGIN PUBLIC KEY-----';
@@ -610,7 +621,7 @@ function wa_challenge_consume(string $purpose): ?string
     if ((string) ($slot['purpose'] ?? '') !== $purpose) {
         return null;
     }
-    if (time() - (int) ($slot['at'] ?? 0) > WA_CHALLENGE_TTL) {
+    if (time() - (int) ($slot['at'] ?? 0) > wa_challenge_ttl($purpose)) {
         return null;
     }
     $value = (string) ($slot['value'] ?? '');
