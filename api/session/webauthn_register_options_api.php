@@ -98,7 +98,8 @@ echo json_encode([
     'authenticatorSelection' => [
         'userVerification'  => 'required',
         'residentKey'       => 'preferred',
-        'requireResidentKey' => false,
+        // 故意不传 requireResidentKey（已弃用的遗留字段）。
+        // 它和 residentKey 同时存在时，部分 Safari 版本会直接拒绝整个请求。
     ],
     'excludeCredentials' => $exclude,
 ], JSON_UNESCAPED_UNICODE);

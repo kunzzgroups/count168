@@ -22,6 +22,7 @@ import { registerDeviceToken, revokeDeviceToken } from "../../lib/deviceTokenApi
 import {
   createPasskey,
   listPasskeys,
+  passkeyErrorMessage,
   platformAuthenticatorAvailable,
   removeAllPasskeys,
   webauthnSupported,
@@ -172,10 +173,10 @@ export default function SettingsPage() {
     try {
       const result = await createPasskey(getDeviceName());
       if (!result.ok) {
-        // 用户主动取消不算错误，不要弹红字吓人
-        if (result.code !== "NotAllowedError" && result.code !== "CANCELLED") {
-          setPkError(result.message || i18n.passkeyAddFailed || "Could not add a passkey.");
-        }
+        // 不再把 NotAllowedError 当成“用户取消”而静默吞掉：
+        // 它同时也是“没有用户手势 / 超时 / 策略不允许”的代码。
+        // 任何失败都要给一个带原因（或错误码）的提示。
+        setPkError(passkeyErrorMessage(lang, result.code, i18n.passkeyAddFailed));
         return;
       }
       const listed = await listPasskeys();
@@ -184,7 +185,7 @@ export default function SettingsPage() {
     } finally {
       setPkBusy(false);
     }
-  }, [i18n.passkeyAddFailed]);
+  }, [i18n.passkeyAddFailed, lang]);
 
   const handleRemovePasskeys = useCallback(async () => {
     setPkBusy(true);

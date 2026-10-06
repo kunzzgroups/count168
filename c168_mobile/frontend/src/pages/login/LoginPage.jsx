@@ -19,6 +19,7 @@ import { registerDeviceToken } from "../../lib/deviceTokenApi.js";
 import { readLastCompanyId, writeLastCompanyId } from "../../lib/lastLoginPrefs.js";
 import {
   loginWithPasskey,
+  passkeyErrorMessage,
   platformAuthenticatorAvailable,
   webauthnSupported,
 } from "../../lib/webauthn.js";
@@ -388,17 +389,15 @@ export default function LoginPage() {
     try {
       const result = await loginWithPasskey();
       if (!result.ok) {
-        // 用户取消不提示：那是主动放弃，不是失败
-        if (result.code !== "NotAllowedError" && result.code !== "CANCELLED") {
-          showNotice(result.message || i18n.passkeyFailed);
-        }
+        // 带原因/错误码地提示 —— 只显示“失败”会让用户和我都无从而适
+        showNotice(passkeyErrorMessage(lang, result.code, i18n.passkeyFailed));
         return;
       }
       await finishLogin(result.redirect || "/dashboard");
     } finally {
       setPkBusy(false);
     }
-  }, [finishLogin, i18n.passkeyFailed, showNotice]);
+  }, [finishLogin, i18n.passkeyFailed, lang, showNotice]);
   useAuthBackground();
 
   // 「用 Face ID / 指纹登录」入口：只在浏览器支持 WebAuthn 且存在平台验证器时出现。

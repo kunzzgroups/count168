@@ -27,6 +27,70 @@ function bytesToB64url(buffer) {
   return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
+/* ── 错误码 → 可操作的原因 ────────────────────────────────── */
+
+/**
+ * WebAuthn / 服务端错误码的翻译表。
+ *
+ * 为什么值得维护：只显示「失败」等于没有信息，用户无法自救，我也无法定位。
+ * **未知错误码会把原码附在括号里** —— 这是有意的：宁可看起来技术一点，
+ * 也不要再出现「失败了但不知道为何」。等错误都覆盖后再考虑收敛。
+ */
+const PASSKEY_ERRORS = {
+  zh: {
+    NotAllowedError: "验证未完成（可能被取消或超时）。请重试，并完成 Face ID / 指纹验证。",
+    SecurityError: "当前网址无法注册 passkey（域名与 RP ID 不匹配）。请确认地址是 https://www.count168.com。",
+    InvalidStateError: "这台设备已经注册过 passkey 了。",
+    NotSupportedError: "当前环境不支持 passkey。若你是从“添加到主屏幕”打开，请改用 Safari。",
+    AbortError: "验证被中断，请重试。",
+    TypeError: "浏览器拒绝了这次注册请求（参数不兼容）。",
+    UNSUPPORTED: "此浏览器不支持生物识别登录。",
+    NO_CREDENTIAL: "没有拿到凭据数据，请重试。",
+    OPTIONS_FAILED: "服务器拒绝了这次请求，请重新登录后再试。",
+    CLIENT_DATA_INVALID: "验证数据校验失败，请重试。",
+    ATTESTATION_INVALID: "无法验证这台设备的凭据。",
+    CREDENTIAL_MISMATCH: "凭据校验不一致，请重试。",
+    CHALLENGE_EXPIRED: "这次请求已过期，请重试。",
+    SECONDARY_PASSWORD_REQUIRED: "请先通过二级密码验证。",
+    CREDENTIAL_LIMIT: "注册数量已达上限。",
+    NOT_LOGGED_IN: "登录状态已失效，请重新登录。",
+    VERIFY_FAILED: "服务器未能验证这次注册。",
+  },
+  en: {
+    NotAllowedError: "Verification did not complete (cancelled or timed out). Please try again and finish the Face ID / fingerprint prompt.",
+    SecurityError: "This address cannot register a passkey (domain and RP ID mismatch). Check that you are on https://www.count168.com.",
+    InvalidStateError: "This device already has a passkey.",
+    NotSupportedError: "Passkeys are not supported here. If you opened this from the home screen, use Safari instead.",
+    AbortError: "Verification was interrupted. Please try again.",
+    TypeError: "The browser rejected this request (incompatible parameters).",
+    UNSUPPORTED: "This browser cannot use biometric login.",
+    NO_CREDENTIAL: "No credential data received. Please try again.",
+    OPTIONS_FAILED: "The server rejected this request. Please login again and retry.",
+    CLIENT_DATA_INVALID: "Could not verify this request. Please try again.",
+    ATTESTATION_INVALID: "Could not verify this device.",
+    CREDENTIAL_MISMATCH: "Credential mismatch. Please try again.",
+    CHALLENGE_EXPIRED: "This request expired. Please try again.",
+    SECONDARY_PASSWORD_REQUIRED: "Please verify your secondary password first.",
+    CREDENTIAL_LIMIT: "You have reached the passkey limit.",
+    NOT_LOGGED_IN: "Your session expired. Please login again.",
+    VERIFY_FAILED: "The server could not verify this registration.",
+  },
+};
+
+/**
+ * @param {string} lang
+ * @param {string} code  WebAuthn 异常名或服务端错误码
+ * @param {string} fallback 翻译表没有时的基础文案
+ */
+export function passkeyErrorMessage(lang, code, fallback) {
+  const table = PASSKEY_ERRORS[lang] || PASSKEY_ERRORS.en;
+  if (code && table[code]) {
+    return table[code];
+  }
+  const base = fallback || (lang === "zh" ? "操作失败。" : "Something went wrong.");
+  return code ? `${base} (${code})` : base;
+}
+
 /* ── 能力探测 ───────────────────────────────────────────────── */
 
 /** 当前环境是否支持 WebAuthn（必须是安全上下文：https 或 localhost） */
@@ -109,14 +173,24 @@ export async function createPasskey(deviceName) {
         timeout: opt.timeout,
         attestation: opt.attestation,
         authenticatorSelection: opt.authenticatorSelection,
-        excludeCredentials: (opt.excludeCredentials || []).map((c) => ({
-          type: c.type,
-          id: b64urlToBytes(c.id),
-        })),
+        // 只在非空时传。空数组虽然合法，但 Safari 对参数形状特别挑，
+        // 能少传一个就少一个变数。
+        ...((opt.excludeCredentials || []).length > 0
+          ? {
+              excludeCredentials: opt.excludeCredentials.map((c) => ({
+                type: c.type,
+                id: b64urlToBytes(c.id),
+              })),
+            }
+          : {}),
       },
     });
   } catch (err) {
-    // 用户取消 / 超时 / 设备不支持 —— 都不是错误状态，只需要安静地退回
+    // 把原始错误名带回去 —— 否则界面上只能显示“失败”，无法定位。
+    // 注意：**不**把 NotAllowedError 当成“用户取消”而静默吞掉：
+    // 它同时也是“没有用户手势 / 认证超时 / 策略不允许”的代码，吞了就等于掩盖真故障。
+    // eslint-disable-next-line no-console
+    console.error("[webauthn] create() failed:", err?.name, err?.message, err);
     return { ok: false, code: err?.name || "CANCELLED", message: "" };
   }
 
@@ -166,6 +240,8 @@ export async function loginWithPasskey() {
       },
     });
   } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error("[webauthn] get() failed:", err?.name, err?.message, err);
     return { ok: false, code: err?.name || "CANCELLED", message: "" };
   }
 
