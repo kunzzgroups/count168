@@ -26,6 +26,7 @@ import {
   biometricDiagnostic,
   listPasskeys,
   passkeyErrorMessage,
+  platformAuthenticatorAvailable,
   removeAllPasskeys,
   webauthnSupported,
 } from "../../lib/webauthn.js";
@@ -125,21 +126,23 @@ export default function SettingsPage() {
           setBioEnabled(Boolean(storedToken));
           return;
         }
-        // 原生插件没应答 → 记下原因，界面上一行短字（APK 关了 web 调试，只能靠这个）
+        // 原生插件没应答 → 记下原因，然后**继续往下走**（回到这次改动前的行为）。
+        // 不就地封死的原因：原生不可用时应当让 passkey 有机会接管，
+        // 而安卓 WebView 会因为下面的 platformAuthenticatorAvailable() 为 false
+        // 而自然被拦住 —— 所以不存在“安卓误入 passkey”的风险。
         const report = await biometryReport();
         if (cancelled) return;
         setBioUnavailableReason(report);
-        // ⚠️ 必须就地返回，**绝不能落到下面的 WebAuthn 分支**：
-        // 安卓 WebView 会谎报 WebAuthn 可用，落下去又会变成
-        // “安卓一开启就失败”。原生环境就用原生机制，不行就是不行。
-        setBioMode("native");
-        setBioTypeLabel("");
-        setBioSupported(false);
-        return;
       }
 
-      // ② 网页端：有 WebAuthn 就走 passkey
-      if (webauthnSupported()) {
+      // ② 网页端：WebAuthn **且** 存在平台验证器时才走 passkey。
+      //
+      // ⚠️ platformAuthenticatorAvailable() 这一半不能省：
+      // 安卓 WebView 会谎报 webauthnSupported() 为真，但平台验证器探测为 **false**；
+      // 这正是当初安卓不会误入 passkey 的原因。
+      // （我曾经因为怀疑它在 iOS 上给假阴性而删掉它，结果安卓就坏了 ——
+      //   而那个“假阴性”实际是 isNative() 误判造成的，与它无关。）
+      if (webauthnSupported() && (await platformAuthenticatorAvailable())) {
         setBioMode("passkey");
         setBioTypeLabel("");
         setBioSupported(true);
