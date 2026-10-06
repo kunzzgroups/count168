@@ -38,6 +38,60 @@ function auth_cookie_secure_flag(): bool
             && strtolower((string) $_SERVER['HTTP_X_FORWARDED_PROTO']) === 'https');
 }
 
+/**
+ * 改密码后吐销该账号**全部**设备令牌（移动端指纹解锁）。
+ *
+ * 与 invalidate_user_remember_token() 并列，但覆盖面不同：
+ * remember_token 只存在于 user 表，而 device_token 覆盖 owner / user / member
+ * 三种身份 —— 只调 remember 那个会漏掉 owner 和 member 的指纹解锁。
+ *
+ * @param string $userType 'owner' | 'user' | 'member'
+ */
+function invalidate_device_tokens(PDO $pdo, string $userType, int $userId): void
+{
+    $userId = (int) $userId;
+    if ($userId <= 0) {
+        return;
+    }
+
+    $userType = strtolower(trim($userType));
+    if (!in_array($userType, ['owner', 'user', 'member'], true)) {
+        return;
+    }
+
+    try {
+        // 懒加载：绝大多数请求不需要设备令牌功能，不拉进主链路
+        require_once __DIR__ . '/device_token.php';
+        device_token_revoke($pdo, $userType, $userId, null);
+    } catch (Throwable $e) {
+        error_log('invalidate_device_tokens failed: ' . $e->getMessage());
+    }
+}
+
+/**
+ * 写 remember_token cookie（免登录）。
+ *
+ * 为什么必须集中在这一处：原先 api/session/login_api.php 有 3 处内联 setcookie，
+ * 参数是 (..., "/", "", false, true) —— 第 6 个参数就是 Secure，三处全传了 false。
+ * 结果：HTTPS 站点上的免登录 cookie 会被任何 http:// 请求明文带走。
+ *
+ * Secure 用 auth_cookie_secure_flag() 动态判断，因此本地 http 开发仍可写入，
+ * 生产 HTTPS 上自动带上 Secure。
+ */
+function auth_set_remember_token_cookie(string $token, int $ttlSeconds = 2592000): void
+{
+    $cookieParams = session_get_cookie_params();
+
+    setcookie('remember_token', $token, [
+        'expires' => time() + $ttlSeconds,
+        'path' => '/',
+        'domain' => $cookieParams['domain'] ?: '',
+        'secure' => auth_cookie_secure_flag(),
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+}
+
 function clear_remember_token_cookie(): void
 {
     $cookieParams = session_get_cookie_params();
@@ -116,6 +170,13 @@ function auth_force_logout_session(?PDO $pdo, bool $isApiRequest): void
         if ($userType === 'user' || $userType === '') {
             invalidate_user_remember_token($pdo, (int) $_SESSION['user_id']);
         }
+
+        // 密码已变 → 指纹解锁凭据一并作废，否则旧密码换来的设备令牌仍能开门
+        $deviceUserType = $userType;
+        if ($deviceUserType === '') {
+            $deviceUserType = strtolower((string) ($_SESSION['role'] ?? '')) === 'owner' ? 'owner' : 'user';
+        }
+        invalidate_device_tokens($pdo, $deviceUserType, (int) $_SESSION['user_id']);
     }
 
     if (function_exists('session_user_payload_cache_clear')) {

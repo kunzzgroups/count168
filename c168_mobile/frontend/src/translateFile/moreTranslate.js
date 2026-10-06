@@ -3,6 +3,13 @@ import { DASHBOARD_I18N } from "./dashboardTranslate.js";
 export const MORE_I18N = {
   en: {
     ...DASHBOARD_I18N.en,
+    biometric: "Fingerprint unlock",
+    bioOn: "On",
+    bioOff: "Off",
+    bioUnsupported: "Not available on this device",
+    bioEnableFailed: "Could not enable fingerprint unlock.",
+    bioDeviceLimit: "Too many devices. Revoke one first.",
+    loginDevices: "Login devices",
     more: "More",
     moreSubtitle: "Tools and settings",
     report: "Report",
@@ -28,6 +35,13 @@ export const MORE_I18N = {
   },
   zh: {
     ...DASHBOARD_I18N.zh,
+    biometric: "指纹解锁",
+    bioOn: "已开启",
+    bioOff: "已关闭",
+    bioUnsupported: "本设备不支持",
+    bioEnableFailed: "开启指纹解锁失败。",
+    bioDeviceLimit: "设备数已达上限，请先下线一台。",
+    loginDevices: "我的登录设备",
     more: "更多",
     moreSubtitle: "工具与设置",
     report: "报表",

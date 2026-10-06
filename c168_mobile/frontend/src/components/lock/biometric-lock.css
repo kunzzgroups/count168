@@ -1,0 +1,111 @@
+/* 指纹解锁门禁层 —— 全屏不透明遮罩，防止锁屏期间闪出登录页或仪表盘 */
+
+.bio-lock {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: #f4f7fc;
+  overscroll-behavior: none;
+}
+
+.bio-lock__bg {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(160deg, var(--login-bg-start, #004ff9), var(--login-bg-end, #56ccf2));
+  opacity: 0.96;
+}
+
+.bio-lock__card {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 340px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 34px 24px 26px;
+  border-radius: var(--login-radius-xl, 24px);
+  background: var(--login-surface, rgba(255, 255, 255, 0.95));
+  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.22);
+  text-align: center;
+}
+
+.bio-lock__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--m-color-primary-soft, #e8efff);
+  color: var(--m-color-primary, #0d60ff);
+  font-size: 30px;
+}
+
+.bio-lock__title {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  color: var(--m-color-text, #1e293b);
+}
+
+.bio-lock__hint {
+  margin: 0;
+  min-height: 20px;
+  font-size: 0.875rem;
+  line-height: 1.45;
+  color: var(--m-color-muted, #64748b);
+}
+
+.bio-lock__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: var(--login-submit-height, 48px);
+  border: 0;
+  border-radius: var(--login-radius-pill, 999px);
+  font-family: inherit;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.bio-lock__btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.bio-lock__btn--primary {
+  margin-top: 4px;
+  color: #fff;
+  background: var(--m-grad-brand, linear-gradient(180deg, #63c4ff, #0d60ff));
+}
+
+.bio-lock__btn--ghost {
+  background: transparent;
+  color: var(--m-color-primary-soft-text, #1d4ed8);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .bio-lock__card {
+    animation: bio-lock-in 220ms ease-out both;
+  }
+}
+
+@keyframes bio-lock-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

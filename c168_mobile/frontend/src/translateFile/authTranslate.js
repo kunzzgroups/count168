@@ -96,6 +96,13 @@ export const LOGIN_I18N = {
     confirm: "Confirm",
     maintenanceLabel: "System Maintenance:",
     unknownError: "Unknown error",
+    bioTitle: "Fingerprint unlock",
+    bioBody:
+      "Unlock EazyCount with your fingerprint instead of typing the password next time.",
+    bioEnable: "Enable",
+    bioLater: "Not now",
+    bioEnableFailed: "Could not enable fingerprint unlock.",
+    bioDeviceLimit: "Too many devices. Remove one under More > Login devices first.",
   },
   zh: {
     admin: "管理员",
@@ -119,6 +126,12 @@ export const LOGIN_I18N = {
     confirm: "确认",
     maintenanceLabel: "系统维护中:",
     unknownError: "未知错误",
+    bioTitle: "指纹解锁",
+    bioBody: "下次打开 EazyCount 用指纹直接进入，不用再输密码。",
+    bioEnable: "开启",
+    bioLater: "暂不开启",
+    bioEnableFailed: "开启指纹解锁失败。",
+    bioDeviceLimit: "设备数已达上限，请先在「更多 > 我的登录设备」里下线一台。",
   },
 };
 

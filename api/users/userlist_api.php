@@ -2601,6 +2601,8 @@ try {
 
                 if ($userPasswordWasUpdated) {
                     invalidate_user_remember_token($pdo, (int) $input['id']);
+                    // 指纹解锁凭据同步作废（device_token 覆盖 owner/user/member）
+                    invalidate_device_tokens($pdo, 'user', (int) $input['id']);
                 }
                 
                 // 同步 read_only 到 company_ownership

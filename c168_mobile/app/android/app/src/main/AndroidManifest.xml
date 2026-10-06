@@ -32,4 +32,8 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- 指纹 / 人脸解锁。androidx.biometric 的 AAR 已声明此权限（会并入），
+         这里显式写明以免日后更换依赖时静默丢失。 -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
 </manifest>

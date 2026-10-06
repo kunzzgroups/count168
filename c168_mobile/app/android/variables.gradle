@@ -4,6 +4,9 @@ ext {
     targetSdkVersion = 36
     androidxActivityVersion = '1.11.0'
     androidxAppCompatVersion = '1.7.1'
+    // @aparajita/capacitor-biometric-auth 的 android/build.gradle 引用了这个变量，
+    // 缺失会报 "Could not get unknown property 'androidxMaterialVersion'" 直接编译失败。
+    androidxMaterialVersion = '1.12.0'
     androidxCoordinatorLayoutVersion = '1.3.0'
     androidxCoreVersion = '1.17.0'
     androidxFragmentVersion = '1.8.9'

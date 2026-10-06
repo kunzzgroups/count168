@@ -233,7 +233,7 @@ try {
                 $remember_token = bin2hex(random_bytes(32));
                 $stmt = $pdo->prepare("UPDATE user SET remember_token = ?, remember_token_expires = DATE_ADD(NOW(), INTERVAL 30 DAY) WHERE id = ?");
                 $stmt->execute([$remember_token, $user['id']]);
-                setcookie('remember_token', $remember_token, time() + (30 * 24 * 60 * 60), "/", "", false, true);
+                auth_set_remember_token_cookie($remember_token);
             } else {
                 invalidate_user_remember_token($pdo, (int) $user['id']);
                 clear_remember_token_cookie();
@@ -343,7 +343,7 @@ try {
             $stmt->execute([$remember_token, $user['id']]);
             
             // 设置cookie，30天过期
-            setcookie('remember_token', $remember_token, time() + (30 * 24 * 60 * 60), "/", "", false, true);
+            auth_set_remember_token_cookie($remember_token);
         } else {
             invalidate_user_remember_token($pdo, (int) $user['id']);
             clear_remember_token_cookie();
@@ -432,7 +432,7 @@ try {
                 $remember_token = bin2hex(random_bytes(32));
                 $stmt = $pdo->prepare("UPDATE user SET remember_token = ?, remember_token_expires = DATE_ADD(NOW(), INTERVAL 30 DAY) WHERE id = ?");
                 $stmt->execute([$remember_token, $user['id']]);
-                setcookie('remember_token', $remember_token, time() + (30 * 24 * 60 * 60), "/", "", false, true);
+                auth_set_remember_token_cookie($remember_token);
             } else {
                 invalidate_user_remember_token($pdo, (int) $user['id']);
                 clear_remember_token_cookie();

@@ -78,6 +78,8 @@ try {
         $hashed = secure_hash_password($new_password);
         $pdo->prepare("UPDATE user SET password = ? WHERE id = ?")->execute([$hashed, $user_id]);
         invalidate_user_remember_token($pdo, (int) $user_id);
+        // 指纹解锁凭据同步作废（device_token 覆盖 owner/user/member，比 remember_token 广）
+        invalidate_device_tokens($pdo, 'user', (int) $user_id);
         $pdo->prepare("DELETE FROM password_reset_tac WHERE email = ? AND company_id = ?")->execute([$email, $company_numeric_id]);
         echo json_encode(['success' => true, 'message' => 'Password reset successful']);
         exit;
@@ -111,6 +113,8 @@ try {
 
     $hashed = secure_hash_password($new_password);
     $pdo->prepare("UPDATE owner SET password = ? WHERE id = ?")->execute([$hashed, $owner_id]);
+    // owner 没有 remember_token，但可能有指纹解锁令牌
+    invalidate_device_tokens($pdo, 'owner', (int) $owner_id);
     $pdo->prepare("DELETE FROM password_reset_tac_owner WHERE email = ? AND owner_id = ?")->execute([$email_lower, $owner_id]);
     echo json_encode(['success' => true, 'message' => 'Password reset successful']);
 } catch (Exception $e) {

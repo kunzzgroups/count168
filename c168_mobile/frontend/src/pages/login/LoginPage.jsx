@@ -7,6 +7,15 @@ import { resolveMobileLandingPath } from "../../utils/mobilePermissions.js";
 import { useAuthBackground } from "./useAuthBackground.js";
 import PasswordInput from "../../components/PasswordInput.jsx";
 import { extractPlainTextFromRichText } from "../../utils/content/richTextSanitizer.js";
+import {
+  getDeviceId,
+  getDeviceName,
+  isAvailable as biometricAvailable,
+  isNative,
+  loadToken,
+  saveToken,
+} from "../../lib/biometricStore.js";
+import { registerDeviceToken } from "../../lib/deviceTokenApi.js";
 
 const LOGIN_ASSET_RETRY_KEY = "ec_mobile_login_asset_retry";
 
@@ -119,6 +128,47 @@ function AlertModal({ open, title, message, confirmText, onClose }) {
   );
 }
 
+function EnrollModal({ open, busy, error, title, body, enableLabel, laterLabel, onEnable, onSkip }) {
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKey = (e) => {
+      if (e.key === "Escape" && !busy) onSkip();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open, busy, onSkip]);
+
+  return (
+    <div
+      className={`sc-login-modal-overlay${open ? " is-open" : ""}`}
+      aria-hidden={open ? "false" : "true"}
+    >
+      <div className="sc-login-modal-box" role="dialog" aria-labelledby="enrollTitle">
+        <div className="sc-login-modal-icon-wrap">
+          <i className="fas fa-fingerprint sc-login-modal-icon" aria-hidden="true" />
+        </div>
+        <h3 id="enrollTitle" className="sc-login-modal-title">
+          {title}
+        </h3>
+        <p className="sc-login-modal-message">{error || body}</p>
+        <div className="sc-login-modal-actions">
+          <button
+            type="button"
+            className="sc-login-btn sc-login-btn-primary"
+            onClick={onEnable}
+            disabled={busy}
+          >
+            {busy ? <i className="fas fa-spinner fa-spin" aria-hidden="true" /> : enableLabel}
+          </button>
+          <button type="button" className="sc-login-btn" onClick={onSkip} disabled={busy}>
+            {laterLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function LoginPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -133,6 +183,7 @@ export default function LoginPage() {
   const [rememberMe, setRememberMe] = useState(false);
   const [maintenanceList, setMaintenanceList] = useState([]);
   const [modal, setModal] = useState({ open: false, title: "Notice", message: "" });
+  const [enroll, setEnroll] = useState({ open: false, targetPath: "", busy: false, error: "" });
   const [submitting, setSubmitting] = useState(false);
   const [lang, setLang] = useState(() => readLoginLang());
 
@@ -252,6 +303,66 @@ export default function LoginPage() {
     [i18n.notice, i18n.unknownError],
   );
 
+  /**
+   * 登录成功后的落地点。仅在 APK 内、且设备支持生物识别、且还没开过指纹时
+   * 先弹「开启指纹解锁」；其余情况直接跳。
+   *
+   * 只在最终落地点调用（dashboard / member），不在二级密码跳转前调用 ——
+   * 后端签发接口要求 secondary_password_verified === true。
+   */
+  const finishLogin = useCallback(
+    async (targetPath) => {
+      try {
+        if (isNative() && (await biometricAvailable()) && !(await loadToken())) {
+          setEnroll({ open: true, targetPath, busy: false, error: "" });
+          return;
+        }
+      } catch {
+        /* 探测失败就静默跳过，不影响登录 */
+      }
+      navigate(targetPath, { replace: true });
+    },
+    [navigate],
+  );
+
+  /** 是否开启指纹解锁；无论选哪个都继续跳转，不让用户卡在这里 */
+  const finishEnroll = useCallback(
+    async (enable) => {
+      const targetPath = enroll.targetPath || "/dashboard";
+      if (!enable) {
+        setEnroll({ open: false, targetPath: "", busy: false, error: "" });
+        navigate(targetPath, { replace: true });
+        return;
+      }
+
+      setEnroll((prev) => ({ ...prev, busy: true, error: "" }));
+      try {
+        const issued = await registerDeviceToken({
+          deviceId: getDeviceId(),
+          deviceName: getDeviceName(),
+        });
+        if (!issued.ok) {
+          // 失败不阻断登录，告知后可重试或直接进 App
+          setEnroll((prev) => ({
+            ...prev,
+            busy: false,
+            error:
+              issued.code === "DEVICE_LIMIT"
+                ? i18n.bioDeviceLimit
+                : i18n.bioEnableFailed,
+          }));
+          return;
+        }
+        await saveToken(issued.token);
+        setEnroll({ open: false, targetPath: "", busy: false, error: "" });
+        navigate(targetPath, { replace: true });
+      } catch {
+        setEnroll((prev) => ({ ...prev, busy: false, error: i18n.bioEnableFailed }));
+      }
+    },
+    [enroll.targetPath, i18n.bioDeviceLimit, i18n.bioEnableFailed, navigate],
+  );
+
   useAuthBackground();
 
   useEffect(() => {
@@ -351,7 +462,7 @@ export default function LoginPage() {
           return;
         }
         if (role === "member" || String(data.user_type || "").toLowerCase() === "member") {
-          navigate("/member", { replace: true });
+          void finishLogin("/member");
           return;
         }
 
@@ -369,7 +480,7 @@ export default function LoginPage() {
           /* fall through */
         }
 
-        navigate(resolvePostLoginPath(data, role, me), { replace: true });
+        void finishLogin(resolvePostLoginPath(data, role, me));
         return;
       }
 
@@ -534,6 +645,18 @@ export default function LoginPage() {
         message={modal.message}
         confirmText={i18n.confirm}
         onClose={() => setModal((m) => ({ ...m, open: false }))}
+      />
+
+      <EnrollModal
+        open={enroll.open}
+        busy={enroll.busy}
+        error={enroll.error}
+        title={i18n.bioTitle}
+        body={i18n.bioBody}
+        enableLabel={i18n.bioEnable}
+        laterLabel={i18n.bioLater}
+        onSkip={() => void finishEnroll(false)}
+        onEnable={() => void finishEnroll(true)}
       />
     </>
   );
