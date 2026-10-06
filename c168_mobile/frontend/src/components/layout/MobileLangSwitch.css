@@ -85,3 +85,17 @@
 .mobile-theme-switch[data-theme="dark"] .mobile-lang-switch__thumb {
   transform: translateX(100%);
 }
+
+/* On / Off 分段开关 —— 与 lang / theme 同一套外观，只是滑块位置的语义不同 */
+.mobile-onoff-switch .mobile-lang-switch__seg {
+  font-size: var(--m-text-micro);
+  letter-spacing: 0.01em;
+}
+
+.mobile-onoff-switch[data-on="on"] .mobile-lang-switch__thumb {
+  transform: translateX(100%);
+}
+
+.mobile-onoff-switch .mobile-lang-switch__seg:disabled {
+  opacity: 0.55;
+}

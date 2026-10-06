@@ -35,6 +35,21 @@ const DEVICE_TOKEN_WEB_TTL_DAYS = 30;
 /** 网页端浏览器标识 cookie（非机密，只为让不同浏览器各自一条记录，而不是互相覆盖） */
 const DEVICE_TOKEN_WEB_COOKIE = 'ec_web_device';
 
+/**
+ * 受信任凭据（指纹解锁 / 网页记住我）恢复会话时，是否跳过二级密码。
+ *
+ * ⚠️ 这个开关**推翻了**方案文档决策 4 的结论「二级密码必须重输」——
+ * 那是当时经产品方确认的安全底线，现在是产品方明确要求改掉。
+ *
+ * 影响面（已核实）：二级密码在本项目里**只做登录门禁**，
+ * 不参与交易审批或任何其它敏感动作。所以跳过它不会额外解锁任何能力，
+ * 唯一的门槛从「已解锁手机 + 指纹 + 6 位码」变成「已解锁手机 + 指纹」
+ * （网页端则是「拿到那个勾了记住我的浏览器」）。
+ *
+ * 要恢复原行为：把这里改成 false，**不需改其它任何地方**。
+ */
+const DEVICE_TOKEN_TRUSTED_SKIPS_SECONDARY = true;
+
 /** 会话快照体积上限；超出则丢弃数组值（防某个账号的租户列表把行撑爆） */
 const DEVICE_TOKEN_SNAPSHOT_MAX_BYTES = 65536;
 
@@ -844,6 +859,13 @@ function device_token_try_restore_from_cookie(PDO $pdo): bool
     if ((int) ($_SESSION['user_id'] ?? 0) !== $userId
         || (string) ($_SESSION['user_type'] ?? '') !== $userType) {
         return false;
+    }
+
+    // 受信任凭据放行二级密码（同一策略，见 DEVICE_TOKEN_TRUSTED_SKIPS_SECONDARY 说明）。
+    // 注意：必须在 device_token_restore_session() **之后**设，因为还原会清掉这个标记。
+    if (DEVICE_TOKEN_TRUSTED_SKIPS_SECONDARY
+        && device_token_secondary_password_redirect($pdo, $userType, $userId, $snapshot) !== null) {
+        $_SESSION['secondary_password_verified'] = true;
     }
 
     device_token_touch($pdo, (int) $row['id']);

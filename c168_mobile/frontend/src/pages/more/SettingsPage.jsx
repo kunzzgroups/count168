@@ -4,6 +4,7 @@ import MobileShell from "../../components/layout/MobileShell.jsx";
 import MobileSubpageHeader from "../../components/layout/MobileSubpageHeader.jsx";
 import MobileLangSwitch from "../../components/layout/MobileLangSwitch.jsx";
 import MobileThemeSwitch from "../../components/layout/MobileThemeSwitch.jsx";
+import MobileOnOffSwitch from "../../components/layout/MobileOnOffSwitch.jsx";
 import { fetchJson } from "../../lib/fetchJson.js";
 import { useSyncedLoginLang, writeLoginLang } from "../../lib/loginLang.js";
 import { readLoginTheme, writeLoginTheme } from "../../lib/loginTheme.js";
@@ -11,10 +12,9 @@ import { MORE_I18N } from "../../translateFile/moreTranslate.js";
 import { buildApiUrl } from "../../utils/apiUrl.js";
 import {
   clearToken,
+  describeBiometry,
   getDeviceId,
   getDeviceName,
-  isAvailable as biometricAvailable,
-  isNative,
   loadToken,
   saveToken,
 } from "../../lib/biometricStore.js";
@@ -39,6 +39,7 @@ export default function SettingsPage() {
   const [theme, setThemeState] = useState(() => readLoginTheme());
   const [bioSupported, setBioSupported] = useState(false);
   const [bioEnabled, setBioEnabled] = useState(false);
+  const [bioTypeLabel, setBioTypeLabel] = useState("");
   const [bioBusy, setBioBusy] = useState(false);
   const [bioError, setBioError] = useState("");
   const i18n = useMemo(() => MORE_I18N[lang] || MORE_I18N.en, [lang]);
@@ -84,49 +85,55 @@ export default function SettingsPage() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const supported = isNative() && (await biometricAvailable());
+      // describeBiometry() 不可用时返回空串，所以它同时就是“是否支持”的判据
+      const [label, storedToken] = await Promise.all([describeBiometry(), loadToken()]);
       if (cancelled) return;
-      setBioSupported(supported);
-      if (!supported) return;
-      setBioEnabled(Boolean(await loadToken()));
+      setBioTypeLabel(label);
+      setBioSupported(label !== "");
+      setBioEnabled(Boolean(storedToken));
     })();
     return () => {
       cancelled = true;
     };
   }, []);
 
-  const toggleBiometric = useCallback(async () => {
-    setBioBusy(true);
-    setBioError("");
-    try {
-      if (bioEnabled) {
-        // 关闭：先吐销服务端令牌，再清本地
-        await revokeDeviceToken({ deviceId: getDeviceId() });
-        await clearToken();
-        setBioEnabled(false);
-        return;
-      }
+  /** @param {boolean|undefined} next 显式目标值；不传则取反（开关直接传 true/false） */
+  const toggleBiometric = useCallback(
+    async (next) => {
+      const enable = next === undefined ? !bioEnabled : Boolean(next);
+      setBioBusy(true);
+      setBioError("");
+      try {
+        if (!enable) {
+          // 关闭：先吐销服务端令牌，再清本地 Keystore
+          await revokeDeviceToken({ deviceId: getDeviceId() });
+          await clearToken();
+          setBioEnabled(false);
+          return;
+        }
 
-      const issued = await registerDeviceToken({
-        deviceId: getDeviceId(),
-        deviceName: getDeviceName(),
-      });
-      if (!issued.ok) {
-        setBioError(
-          issued.code === "DEVICE_LIMIT"
-            ? i18n.bioDeviceLimit || "Too many devices."
-            : i18n.bioEnableFailed || "Could not enable fingerprint unlock.",
-        );
-        return;
+        const issued = await registerDeviceToken({
+          deviceId: getDeviceId(),
+          deviceName: getDeviceName(),
+        });
+        if (!issued.ok) {
+          setBioError(
+            issued.code === "DEVICE_LIMIT"
+              ? i18n.bioDeviceLimit || "Too many devices."
+              : i18n.bioEnableFailed || "Could not enable fingerprint unlock.",
+          );
+          return;
+        }
+        await saveToken(issued.token);
+        setBioEnabled(true);
+      } catch {
+        setBioError(i18n.bioEnableFailed || "Could not enable fingerprint unlock.");
+      } finally {
+        setBioBusy(false);
       }
-      await saveToken(issued.token);
-      setBioEnabled(true);
-    } catch {
-      setBioError(i18n.bioEnableFailed || "Could not enable fingerprint unlock.");
-    } finally {
-      setBioBusy(false);
-    }
-  }, [bioEnabled, i18n.bioDeviceLimit, i18n.bioEnableFailed]);
+    },
+    [bioEnabled, i18n.bioDeviceLimit, i18n.bioEnableFailed],
+  );
 
   const companyCode = String(me?.company_code || me?.company_id || "").toUpperCase();
   const groupId = String(me?.login_group_id || me?.login_identifier || "").toUpperCase();
@@ -191,37 +198,48 @@ export default function SettingsPage() {
               </div>
             </section>
 
-          <section className="m-more-settings-group" aria-label={i18n.biometric || "Biometric"}>
+          <section className="m-more-settings-group" aria-label={i18n.biometric || "Fingerprint unlock"}>
             <div className="m-more-settings-row">
               <span>{i18n.biometric || "Fingerprint unlock"}</span>
               {bioSupported ? (
                 bioBusy ? (
                   <i className="fas fa-spinner fa-spin" aria-hidden="true" />
                 ) : (
-                  <button
-                    type="button"
-                    className="m-more-logout tap-scale"
-                    onClick={() => void toggleBiometric()}
-                  >
-                    {bioEnabled ? i18n.bioOn || "On" : i18n.bioOff || "Off"}
-                  </button>
+                  <MobileOnOffSwitch
+                    on={bioEnabled}
+                    onChange={(next) => void toggleBiometric(next)}
+                    ariaLabel={i18n.biometric || "Fingerprint unlock"}
+                    onLabel={i18n.bioOn || "On"}
+                    offLabel={i18n.bioOff || "Off"}
+                  />
                 )
               ) : (
                 <em>{i18n.bioUnsupported || "Not available on this device"}</em>
               )}
             </div>
+
+            <p className="m-more-settings-hint">
+              {!bioSupported
+                ? i18n.bioUnsupportedHint || ""
+                : bioEnabled
+                  ? [i18n.bioEnabledHint || "", bioTypeLabel].filter(Boolean).join(" · ")
+                  : i18n.bioDisabledHint || ""}
+            </p>
+
             {bioError ? (
-              <div className="m-more-settings-row">
-                <span role="alert">{bioError}</span>
-              </div>
+              <p className="m-more-settings-hint m-more-settings-hint--error" role="alert">
+                {bioError}
+              </p>
             ) : null}
+
             <div className="m-more-settings-row">
+              <span>{i18n.loginDevices || "Login devices"}</span>
               <button
                 type="button"
-                className="m-more-logout tap-scale"
+                className="m-more-settings-link tap-scale"
                 onClick={() => navigate("/more/login-devices")}
               >
-                {i18n.loginDevices || "Login devices"}
+                {i18n.bioManage || "Manage"}
               </button>
             </div>
           </section>

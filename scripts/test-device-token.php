@@ -443,10 +443,35 @@ $_COOKIE['remember_token'] = $oTok['token'];
 ok('恢复成功', device_token_try_restore_from_cookie($pdo) === true);
 ok('恢复出 owner 身份',
     ($_SESSION['user_type'] ?? '') === 'owner' && (int) ($_SESSION['user_id'] ?? 0) === 7);
-ok('★ 恢复后仍无二级密码标记（网页记住我也不放行二级密码）',
-    !isset($_SESSION['secondary_password_verified']));
 ok('owner 专属字段已带回',
     (int) ($_SESSION['owner_id'] ?? 0) === 7 && ($_SESSION['owner_code'] ?? '') === 'K');
+
+// 安全防线分层：
+//  ① device_token_restore_session() 自身**绝不**设置该标记（即使快照被污染）
+//  ② 放行只由显式策略 DEVICE_TOKEN_TRUSTED_SKIPS_SECONDARY 决定
+$_SESSION = [];
+device_token_restore_session(['user_id' => 7, 'user_type' => 'owner', 'secondary_password_verified' => true]);
+ok('★ restore_session 自身绝不设置二级密码标记（防被污染的快照）',
+    !isset($_SESSION['secondary_password_verified']));
+
+// 重新走一次完整恢复，验证策略层确实放行了。用**显式**快照，不依赖当时的 $_SESSION。
+$ownerSnapFull = [
+    'user_id' => 7, 'user_type' => 'owner', 'role' => 'owner',
+    'login_id' => 'K', 'owner_id' => 7, 'real_owner_id' => 7, 'owner_code' => 'K',
+    'company_id' => 1, 'company_code' => 'C168',
+];
+clean($pdo);
+$oPolicy = device_token_issue(
+    $pdo, 'owner', 7, str_repeat('5', 32), 'Browser',
+    $ownerSnapFull, DEVICE_TOKEN_KIND_WEB, 30
+);
+$_SESSION = [];
+$_COOKIE['remember_token'] = $oPolicy['token'];
+ok('策略开启时恢复成功', device_token_try_restore_from_cookie($pdo) === true);
+ok('★ 受信任凭据已放行二级密码（产品决定：owner 不再重输 6 位码）',
+    ($_SESSION['secondary_password_verified'] ?? null) === true);
+ok('该标记确实来自策略而非快照',
+    !array_key_exists('secondary_password_verified', (array) $preSnap));
 
 // 已吐销
 clean($pdo);

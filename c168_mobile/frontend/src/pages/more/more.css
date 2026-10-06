@@ -98,6 +98,41 @@
   font-weight: 700;
 }
 
+/* 设置行右侧的“不可用”说明 */
+.m-more-settings-row > em {
+  max-width: 60%;
+  color: var(--m-color-muted);
+  font-size: var(--m-text-small);
+  font-style: normal;
+  text-align: right;
+}
+
+/* 设置行下方的说明文字 */
+.m-more-settings-hint {
+  margin: 0;
+  padding: 0 0.9rem 0.7rem;
+  color: var(--m-color-muted);
+  font-size: var(--m-text-small);
+  line-height: 1.5;
+}
+
+.m-more-settings-hint--error {
+  color: var(--m-color-danger-text);
+  font-weight: 600;
+}
+
+/* 设置行右侧的行内链接 / 轻量按钮 */
+.m-more-settings-link {
+  border: 0;
+  background: transparent;
+  padding: 0.25rem 0;
+  color: var(--m-color-primary-soft-text);
+  font-family: inherit;
+  font-size: var(--m-text-small);
+  font-weight: 700;
+  cursor: pointer;
+}
+
 .m-more-heading {
   margin-bottom: 1rem;
 }

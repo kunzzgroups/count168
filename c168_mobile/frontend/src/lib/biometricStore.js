@@ -19,7 +19,7 @@
  */
 
 import { Capacitor } from "@capacitor/core";
-import { BiometricAuth } from "@aparajita/capacitor-biometric-auth";
+import { BiometricAuth, BiometryType } from "@aparajita/capacitor-biometric-auth";
 import { SecureStorage } from "@aparajita/capacitor-secure-storage";
 
 /**
@@ -66,6 +66,35 @@ export async function isAvailable() {
     return result?.isAvailable === true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * 设备支持的生物识别类型名，供设置页展示（“指纹” / “Face ID” …）。
+ * 不可用时返回空串 —— 调用方据此决定不渲染开关。
+ */
+export async function describeBiometry() {
+  if (!isNative()) return "";
+  try {
+    const result = await BiometricAuth.checkBiometry();
+    if (result?.isAvailable !== true) return "";
+
+    switch (Number(result.biometryType)) {
+      case BiometryType.touchId:
+        return "Touch ID";
+      case BiometryType.faceId:
+        return "Face ID";
+      case BiometryType.fingerprintAuthentication:
+        return "Fingerprint";
+      case BiometryType.faceAuthentication:
+        return "Face";
+      case BiometryType.irisAuthentication:
+        return "Iris";
+      default:
+        return "Biometric";
+    }
+  } catch {
+    return "";
   }
 }
 
