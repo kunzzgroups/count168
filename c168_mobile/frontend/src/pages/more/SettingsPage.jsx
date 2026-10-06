@@ -27,6 +27,7 @@ import {
 import {
   createPasskey,
   biometricDiagnostic,
+  isStandaloneWebApp,
   listPasskeys,
   passkeyErrorMessage,
   removeAllPasskeys,
@@ -108,25 +109,10 @@ export default function SettingsPage() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (isNative()) {
-        // 原生：describeBiometry() 不可用时返回空串，兼作“是否支持”的判据
-        const [label, storedToken] = await Promise.all([describeBiometry(), loadToken()]);
-        if (cancelled) return;
-        setBioMode("native");
-        setBioTypeLabel(label);
-        setBioSupported(label !== "");
-        setBioEnabled(Boolean(storedToken));
-        // 原生分支失败时也把诊断留下 —— “被误判成原生”恰好是最难看出的一种
-        if (label === "") setBioDiag(biometricDiagnostic());
-        return;
-      }
-
-      // 浏览器：有 WebAuthn 就走 passkey。
-      //
-      // 为什么**不**再把 platformAuthenticatorAvailable() 当门槛：
-      // 它在 iOS 上会给出假阴性（用户实际能成功注册 passkey，但该探测返回 false），
-      // 结果是开关被永久置灰、功能看着“不存在”。宁可放开开关，
-      // 让真正尝试时的错误说清楚原因（错误已按码映射为可读提示）。
+      // ① **先判 WebAuthn**。它的可用性与 isNative() 无关，而且必须先判：
+      //    合并成一栏之后如果先走 isNative()，一旦平台判断误报（iOS 的 WebKit
+      //    就会把网页当成 iOS 原生壳），passkey 入口会**整个消失** ——
+      //    这正是“之前能加 passkey、合并后不能”的原因。
       if (webauthnSupported()) {
         setBioMode("passkey");
         setBioTypeLabel("");
@@ -138,9 +124,24 @@ export default function SettingsPage() {
         return;
       }
 
-      // 没有 WebAuthn —— 典型就是 iOS 的「添加到主屏幕」独立 App。
-      // 那里永远做不了 Face ID，但「不必再输密码」这个结果可以用 30 天免密给到，
-      // 所以这一行改叫「保持登录」，开关控制免登录凭据。
+      // ② 原生：**必须插件真的应答**才算原生。
+      //    只信 isNative() 的话，平台误报会把网页环境带进原生分支，
+      //    然后显示“设备没有指纹/人脸”（与实际不符）。
+      if (isNative()) {
+        const [label, storedToken] = await Promise.all([describeBiometry(), loadToken()]);
+        if (cancelled) return;
+        if (label !== "") {
+          setBioMode("native");
+          setBioTypeLabel(label);
+          setBioSupported(true);
+          setBioEnabled(Boolean(storedToken));
+          return;
+        }
+        // 插件不应答 → 不当原生处理，往下走（至少还有免登录可用）
+      }
+
+      // ③ 没有 WebAuthn（也没有可用的原生插件）→ 退化为「保持登录」。
+      //    比起一个永远置灰的开关，免密登录是真实可用的能力。
       setBioMode("remember");
       setBioTypeLabel("");
       setBioSupported(true);
@@ -345,9 +346,10 @@ export default function SettingsPage() {
 
             <p className="m-more-settings-hint">{bioHint}</p>
 
-            {/* 无 WebAuthn 时：说明 Face ID 只能在 Safari 里用，并给一个可直接打开的入口。
-                iOS 独立 App 里 target="_blank" 会交给 Safari 打开。 */}
-            {bioMode === "remember" ? (
+            {/* 无 WebAuthn 且是「添加到主屏幕」打开时：说明 Face ID 只能在 Safari 里用，
+                并给一个可直接打开的入口。仅在 standalone 下显示 —— 安卓老 APK
+                也会落进 remember 模式，那里提示 Safari 是错的。 */}
+            {bioMode === "remember" && isStandaloneWebApp() ? (
               <p className="m-more-settings-hint">
                 {i18n.bioSafariHint}{" "}
                 <a
