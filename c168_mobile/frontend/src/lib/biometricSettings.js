@@ -181,6 +181,43 @@ export function resolveBiometric(settings, capability) {
   return { ...intent, startable: true };
 }
 
+/**
+ * 把插件探测结果翻译成**运行时能力**。
+ *
+ * ⚠️ 关键在于用**录入**状态，而不是**硬件**类型。
+ *
+ * `biometryTypes` 是「硬件支持哪些类型」—— 手机带指纹传感器它就永远包含指纹，
+ * 用户把指纹从系统里删掉后它**不会变**。实机就是这么踩的：
+ * 指纹已删、人脸还在，App 以仍为可以用指纹，于是拿 strong 去认证必然失败，
+ * 用户看到的就是「指纹没了却也不转去刷脸，只掉回密码登录」。
+ *
+ * 可靠信号只有插件给的两个（都是“已录入”语义）：
+ *   strongBiometryIsAvailable  强生物识别已录入 ≈ 指纹（指纹几乎都是 Class 3）
+ *   isAvailable                弱及以上已录入
+ *
+ * @returns {{state:string, fingerprintAvailable?:boolean, faceAvailable?:boolean}}
+ */
+export function capabilityFromProbe(info) {
+  if (!info || info.ok !== true) return { state: CAP.UNKNOWN };
+
+  // 这两个错误码要先于“没有录入”判断：系统给的原因比我们的推断具体。
+  if (info.code === "biometryLockout") return { state: CAP.TEMPORARILY_LOCKED };
+  if (info.code === "biometryNotEnrolled") return { state: CAP.NOT_ENROLLED };
+
+  if (info.isAvailable !== true && info.strongAvailable !== true) {
+    return { state: CAP.NOT_ENROLLED };
+  }
+
+  return {
+    state: CAP.AVAILABLE,
+    // 指纹：只认「强生物识别已录入」。硬件有传感器 ≠ 用户录了指纹。
+    fingerprintAvailable: info.strongAvailable === true,
+    // 人脸：弱及以上可用即可（人脸通常是弱）。
+    // 无法与「只录了指纹」区分，但那种情况下 weak 认证依然能成，不会误报。
+    faceAvailable: info.isAvailable === true,
+  };
+}
+
 /* ── 持久化（唯一碰 localStorage 的地方）────────────────────────────── */
 
 export function loadSettings() {

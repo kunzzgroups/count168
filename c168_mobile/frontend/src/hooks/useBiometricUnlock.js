@@ -53,6 +53,18 @@ const BIOMETRIC_UNUSABLE_CODES = new Set([
 export const FAIL_BIOMETRIC = "biometric";
 export const FAIL_SERVER = "server";
 
+/**
+ * 这个错误码说明**用户选的那种方式在这台设备上已经用不了了**
+ * （在系统里删了指纹、改了录入、设备凭据被移除）。
+ *
+ * ⚠️ 此时**不能清凭据**。凭据是 SecureStorage 里的 device_token，
+ * 它并不会因为录入变化而失效；清掉只会把功能弄死，而且用户回不了头。
+ * 正确做法：留在锁屏、说出原因、把「换一种方式」摆在界面上（规格 §7）。
+ */
+export function methodUnavailable(code) {
+  return BIOMETRIC_UNUSABLE_CODES.has(code);
+}
+
 export function useBiometricUnlock() {
   const navigate = useNavigate();
   const [state, setState] = useState(() => (isNative() ? GATE_CHECKING : GATE_DISABLED));
@@ -89,12 +101,9 @@ export function useBiometricUnlock() {
       }
 
       if (result.stage === "biometric") {
-        if (BIOMETRIC_UNUSABLE_CODES.has(result.code)) {
-          // 这台设备做不了生物识别了，不要卡在重试上
-          await goDisabled(true);
-          return;
-        }
-        // 用户取消 / 指纹不匹配 / 临时锁定：留在锁屏
+        // 所有生物识别失败一律**留在锁屏**：不自动换方式（规格 §7），
+        // 也不清凭据（见 methodUnavailable 上方说明）。
+        // 界面会根据 code 决定要不要把「换一种方式」推出来。
         setAttempts((n) => n + 1);
         setFailure({ kind: FAIL_BIOMETRIC, code: result.code, message: "" });
         setState(GATE_LOCKED);

@@ -16,6 +16,7 @@ import { dirname, join } from "node:path";
 import {
   CAP,
   METHOD,
+  capabilityFromProbe,
   disabledSettings,
   migrateSettings,
   normalizeSettings,
@@ -165,16 +166,24 @@ test("迁移：有方式但**没有凭据** → 不算开启（不得凭旧布�
 
 /* ── 用例 8：选 FACE 时任何地方都不许声称指纹 ─────────────────────── */
 
-test("用例8：锁屏的失败文案不再硬编码「指纹」", () => {
+test("用例8：锁屏里提到「指纹」的文案必须是方法专属的", () => {
   const gate = src("components", "lock", "BiometricLockGate.jsx");
-  const offending = gate
+  // 无条件渲染的文案（lockedHint / bioFailed / byCode.*）绝不能点名某种方式；
+  // 只有键名里带 Fingerprint 的方法专属文案（比如 methodGoneFingerprint、
+  // switchToFingerprint）才允许提到指纹 —— 它们只在用户真的选了指纹时出现。
+  const offenders = gate
     .split("\n")
     .map((line, i) => [i + 1, line])
-    .filter(([, line]) => /指纹/.test(line) && !/^\s*(\/\/|\*|\/\*)/.test(line));
+    // 注释里提到指纹是用来解释设计的，不算违规
+    .filter(([, line]) => !/^\s*(\/\/|\*|\/\*)/.test(line))
+    .filter(([, line]) => /指纹/.test(line))
+    // 方法专属的键名（methodGoneFingerprint / switchToFingerprint）允许点名指纹，
+    // 它们只在用户真的选了指纹时才会渲染
+    .filter(([, line]) => !/Fingerprint/.test(line));
   assert.deepEqual(
-    offending,
+    offenders,
     [],
-    `锁屏仍硬编码指纹文案：\n${offending.map(([n, l]) => `  ${n}: ${l.trim()}`).join("\n")}`,
+    `锁屏仍硬编码指纹文案：\n${offenders.map(([n, l]) => `  ${n}: ${l.trim()}`).join("\n")}`,
   );
 });
 
@@ -213,6 +222,45 @@ test("「用密码登录」不得清掉凭据（否则每次密码登录都会�
     /goDisabled\(true\)/.test(body),
     false,
     "usePasswordInstead 仍在清凭据 —— 会让 enabled=1 与 token=no 对不上，并反复弹引导",
+  );
+});
+
+/* ── 能力翻译：必须看“录入”，不能看“硬件”（实机踩过）───────────── */
+
+test("删掉指纹但人脸还在 → 不得再说指纹可用", () => {
+  // 真实上报的场景：strongAvailable=false，isAvailable=true
+  const cap = capabilityFromProbe({ ok: true, isAvailable: true, strongAvailable: false });
+  assert.equal(cap.state, CAP.AVAILABLE);
+  assert.equal(cap.fingerprintAvailable, false, "指纹已删却仍报可用（这就是那个 bug）");
+  assert.equal(cap.faceAvailable, true);
+});
+
+test("上面的能力下：选指纹 → 说出原因且不改写；选人脸 → 可启动", () => {
+  const cap = capabilityFromProbe({ ok: true, isAvailable: true, strongAvailable: false });
+
+  const fpPlan = resolveBiometric(fp, cap);
+  assert.equal(fpPlan.method, METHOD.FINGERPRINT, "偏好被改写了");
+  assert.equal(fpPlan.startable, false);
+  assert.equal(fpPlan.reason, "FINGERPRINT_UNAVAILABLE");
+
+  const facePlan = resolveBiometric(face, cap);
+  assert.equal(facePlan.startable, true, "人脸还能用，却不让启动");
+});
+
+test("什么都没录 → NOT_ENROLLED；探测失败 → UNKNOWN（不是“不可用”）", () => {
+  assert.equal(
+    capabilityFromProbe({ ok: true, isAvailable: false, strongAvailable: false }).state,
+    CAP.NOT_ENROLLED,
+  );
+  assert.equal(capabilityFromProbe({ ok: false, why: "timeout" }).state, CAP.UNKNOWN);
+  assert.equal(capabilityFromProbe(null).state, CAP.UNKNOWN);
+});
+
+test("系统临时锁定 → TEMPORARILY_LOCKED（不得当成没录入而清凭据）", () => {
+  assert.equal(
+    capabilityFromProbe({ ok: true, code: "biometryLockout", isAvailable: true, strongAvailable: true })
+      .state,
+    CAP.TEMPORARILY_LOCKED,
   );
 });
 

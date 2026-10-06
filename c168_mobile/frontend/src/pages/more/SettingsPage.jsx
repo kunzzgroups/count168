@@ -27,6 +27,7 @@ import {
 import {
   CAP,
   METHOD,
+  capabilityFromProbe,
   disabledSettings,
   ensureSettings,
   resolveBiometric,
@@ -82,7 +83,7 @@ export default function SettingsPage() {
    *
    * 初始值故意非空：如果连这一行都不显示，那就不是探测失败而是**包没更新**。
    */
-  const BIO_BUILD = "b16";
+  const BIO_BUILD = "b17";
   const [bioDiag, setBioDiag] = useState("boot");
   const i18n = useMemo(() => MORE_I18N[lang] || MORE_I18N.en, [lang]);
 
@@ -155,21 +156,11 @@ export default function SettingsPage() {
       label = "";
     }
     // 设备能力：**只用于诊断与能力展示**，不参与任何“能不能用”的门槛。
-    // （拿它当门槛就是之前两端置灰的原因。）
-    // 注意“未知”是一个独立状态：探测超时 / 报错都归为 UNKNOWN，
-    // **绝不塌缩成「不可用」** —— 那正是 BUG-3。
+    // 翻译规则在 lib/biometricSettings.js 的 capabilityFromProbe 里（有单测），
+    // 关键点是看**录入**而不是**硬件** —— 用 biometryTypes 会把删掉的指纹
+    // 当成仍然可用（实机报过）。
     const info = await biometryInfo();
-    const capability = !info.ok
-      ? { state: CAP.UNKNOWN }
-      : info.code === "biometryLockout"
-        ? { state: CAP.TEMPORARILY_LOCKED }
-        : !info.isAvailable && !info.strongAvailable
-          ? { state: CAP.NOT_ENROLLED }
-          : {
-              state: CAP.AVAILABLE,
-              fingerprintAvailable: info.biometryTypes.includes(3),
-              faceAvailable: info.biometryTypes.includes(4) || info.biometryTypes.includes(5),
-            };
+    const capability = capabilityFromProbe(info);
 
     return {
       mode: "native",

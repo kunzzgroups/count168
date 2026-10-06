@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { readLoginLang } from "../../lib/loginLang.js";
-import { METHOD, ensureSettings } from "../../lib/biometricSettings.js";
+import { METHOD, ensureSettings, saveSettings } from "../../lib/biometricSettings.js";
 import { loadToken } from "../../lib/biometricStore.js";
 import {
   FAIL_BIOMETRIC,
@@ -8,6 +8,7 @@ import {
   GATE_DISABLED,
   GATE_LOCKED,
   GATE_UNLOCKED,
+  methodUnavailable,
   useBiometricUnlock,
 } from "../../hooks/useBiometricUnlock.js";
 import "./biometric-lock.css";
@@ -45,6 +46,11 @@ const TEXT = {
     usePassword: "用密码登录",
     checking: "正在检查登录状态…",
     bioFailed: "未能识别，请重试",
+    // 用户选的那种方式在这台设备上没了（在系统里删了指纹等）
+    methodGoneFingerprint: "这台设备上已经没有可用的指纹了（可能在系统设置里被删掉）。",
+    methodGoneFace: "这台设备上已经没有可用的人脸识别了。",
+    switchToFace: "改用人脸",
+    switchToFingerprint: "改用指纹",
     tooMany: "多次未能识别。可以直接用密码登录。",
     tryLater: "暂时无法验证，请稍后重试",
     // 按具体原因给可操作的提示 ——「暂时不可用」这种话帮不了用户
@@ -70,6 +76,10 @@ const TEXT = {
     usePassword: "Use password",
     checking: "Checking your session…",
     bioFailed: "Not recognised. Please try again.",
+    methodGoneFingerprint: "Fingerprint is no longer set up on this device.",
+    methodGoneFace: "Face recognition is no longer set up on this device.",
+    switchToFace: "Use face instead",
+    switchToFingerprint: "Use fingerprint instead",
     tooMany: "Several attempts failed. You can sign in with your password instead.",
     tryLater: "Temporarily unavailable, please try again",
     byCode: {
@@ -165,6 +175,30 @@ export default function BiometricLockGate({ children }) {
     </button>
   );
 
+  // 用户选的那种方式在这台设备上没了（例如在系统设置里删了指纹）。
+  // 规格 §7：**绝不自动改写偏好**，而是把选择交给用户。
+  const otherMethod = method === METHOD.FINGERPRINT ? METHOD.FACE : METHOD.FINGERPRINT;
+  const offerSwitch = Boolean(failure) && methodUnavailable(failure.code);
+
+  const switchMethod = () => {
+    // 这一步是**用户显式选择**，不是静默回退：写入后立即重试
+    saveSettings({ enabled: true, method: otherMethod });
+    setMethod(otherMethod);
+    void unlock();
+  };
+
+  const switchButton = (primary) => (
+    <button
+      type="button"
+      className={`bio-lock__btn ${primary ? "bio-lock__btn--primary" : "bio-lock__btn--ghost"} tap-scale`}
+      onClick={switchMethod}
+      disabled={busy}
+    >
+      <i className={lockIcon(otherMethod)} aria-hidden="true" />
+      <span>{otherMethod === METHOD.FACE ? t.switchToFace : t.switchToFingerprint}</span>
+    </button>
+  );
+
   const passwordButton = (primary) => (
     <button
       type="button"
@@ -178,8 +212,7 @@ export default function BiometricLockGate({ children }) {
   );
 
   return (
-    <div className="bio-lock" role="dialog" aria-modal="true" aria-label={t.lockedTitle}>
-      <div className="bio-lock__bg" aria-hidden="true" />
+    <div className="bio-lock" role="dialog" aria-modal="true" aria-label={t.lockedTitle}>      <div className="bio-lock__bg" aria-hidden="true" />
       <div className="bio-lock__card">
         <div className="bio-lock__icon" aria-hidden="true">
           <i className={isChecking ? "fas fa-spinner fa-spin" : lockIcon(method)} />
@@ -191,8 +224,18 @@ export default function BiometricLockGate({ children }) {
           <>
             <h1 className="bio-lock__title">{t.lockedTitle}</h1>
             <p className="bio-lock__hint">{hint}</p>
+            {offerSwitch ? (
+              <p className="bio-lock__hint">
+                {method === METHOD.FINGERPRINT ? t.methodGoneFingerprint : t.methodGoneFace}
+              </p>
+            ) : null}
 
-            {passwordFirst ? (
+            {offerSwitch ? (
+              <>
+                {switchButton(true)}
+                {passwordButton(false)}
+              </>
+            ) : passwordFirst ? (
               <>
                 {passwordButton(true)}
                 {retryButton(false)}
