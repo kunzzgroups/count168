@@ -136,7 +136,17 @@ cd .. && git worktree remove count168-com-merge --force && git branch -D com-mer
 > `APP_ROOT="$APP_ROOT" bash deploy/publish-app-page.sh`
 
 > **踩坑 5：Cloudflare 缓存旧 404。** 新资源（如 `qr-com.png`）上线后可能仍 404（CF 缓存 2 小时，`cf-cache-status: HIT`）。
-> 解决：页面引用时带版本参数 `?v=1`（下载页二维码已这么做），或等缓存过期。
+> 解决：页面引用时带版本参数（下载页 `?v=1`、图标 `?v=3` 都是这么做的），或等缓存过期。
+> 注意：**文件名不变时改内容，同样会被 CF 喂回旧字节**，所以每次改图标/logo 都要把 `?v=` 往前推一位。
+
+> **踩坑 6：出包前确认 `c168_mobile/app` 只有你要发的改动。** 2026-10-06 发 com 图标包时，工作副本里
+> 混进了另一条并行任务装的生物识别插件（`@aparajita/capacitor-biometric-auth` + `secure-storage`），
+> `cap sync` 把它们连进 Android 工程：包体 5.5 MB → 7.9 MB（多出 androidx.biometric + Material），
+> 还多一项生物识别权限 —— 差点跟着图标一起发给用户。
+> 干净出包：从独立工作树构建（`git worktree add --detach ../count168-apkbuild HEAD`，并把 gitignore 的
+> `keystore/`、`android/keystore.properties`、`android/local.properties` 拷进去），
+> 或者 `git status --short c168_mobile/app` 逐条过一遍；
+> 出包后 `aapt2 dump badging <apk> | grep uses-permission` 对照预期权限（正常只有 `INTERNET`）。
 
 ---
 
@@ -145,17 +155,17 @@ cd .. && git worktree remove count168-com-merge --force && git branch -D com-mer
 ```bash
 cd c168_mobile/app
 npm i                      # 首次：装 @capacitor/cli
-npm run build:apk:site     # → dist-apk/EazyCount-v1.2-site.apk
-npm run build:apk:org      # → dist-apk/EazyCount-v1.2-org.apk
-npm run build:apk:com      # → dist-apk/EazyCount-v1.2-com.apk
+npm run build:apk:site     # → dist-apk/EazyCount-v1.4-site.apk
+npm run build:apk:org      # → dist-apk/EazyCount-v1.4-org.apk
+npm run build:apk:com      # → dist-apk/EazyCount-v1.4-com.apk
 ```
 
 上传（**绝不跨域名复制**——包内 `server.url` 是写死的，放错了用户看到的就是别家的数据）：
 
 ```bash
-scp -i ~/.ssh/count168-ec2.pem dist-apk/EazyCount-v1.2-site.apk ec2-user@56.68.48.190:/var/www/count168/app/EazyCount-v1.2.apk
-scp -i ~/.ssh/count168-ec2.pem dist-apk/EazyCount-v1.2-org.apk  ec2-user@56.68.48.190:/var/www/count168.org/app/EazyCount-v1.2.apk
-scp -i ~/.ssh/count168-ec2.pem dist-apk/EazyCount-v1.2-com.apk  ec2-user@56.68.48.190:/var/www/count168.com/app/EazyCount-v1.2.apk
+scp -i ~/.ssh/count168-ec2.pem dist-apk/EazyCount-v1.4-site.apk ec2-user@56.68.48.190:/var/www/count168/app/EazyCount-v1.4.apk
+scp -i ~/.ssh/count168-ec2.pem dist-apk/EazyCount-v1.4-org.apk  ec2-user@56.68.48.190:/var/www/count168.org/app/EazyCount-v1.4.apk
+scp -i ~/.ssh/count168-ec2.pem dist-apk/EazyCount-v1.4-com.apk  ec2-user@56.68.48.190:/var/www/count168.com/app/EazyCount-v1.4.apk
 ```
 
 **必须做的验收**（解包看域名 + 线上 md5 对比本地）：
@@ -164,7 +174,7 @@ scp -i ~/.ssh/count168-ec2.pem dist-apk/EazyCount-v1.2-com.apk  ec2-user@56.68.4
 for f in dist-apk/*.apk; do
   printf "%-30s " "$f"; unzip -p "$f" assets/capacitor.config.json | tr -d '\n' | grep -o '"url": "[^"]*"'
 done
-curl -sS https://www.count168.com/app/EazyCount-v1.2.apk | md5sum   # 与本地 com 包一致
+curl -sS https://www.count168.com/app/EazyCount-v1.4.apk | md5sum   # 与本地 com 包一致
 ```
 
 发新版：改 `android/app/build.gradle` 的 `versionCode`/`versionName` → 三个域名各出一次包 → 各自上传新文件、删旧文件 → 更新 `install-page/index.html` 的版本文案与下载文件名。

@@ -9,8 +9,8 @@
 //   android/keystore.properties       storeFile/storePassword/keyAlias/keyPassword
 //   android/local.properties          sdk.dir=<Android SDK 路径>
 //
-// 产物：dist-apk/EazyCount-v1.1-<site>.apk，各域名上传时统一改名 EazyCount-v1.0.apk
-//（安装页里是相对链接，文件名一致就自动指向各自域名的包）。
+// 产物：dist-apk/EazyCount-v<versionName>-<域名>.apk（版本号取自 android/app/build.gradle）
+//（安装页里是相对链接，文件名与安装页引用一致即可。）
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";

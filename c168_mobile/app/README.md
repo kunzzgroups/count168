@@ -32,9 +32,9 @@ app/
 ```bash
 cd c168_mobile/app
 npm i                    # 首次：装 @capacitor/cli 等
-npm run build:apk:site    # → dist-apk/EazyCount-v1.2-site.apk
-npm run build:apk:org     # → dist-apk/EazyCount-v1.2-org.apk
-npm run build:apk:com     # → dist-apk/EazyCount-v1.2-com.apk
+npm run build:apk:site    # → dist-apk/EazyCount-v1.4-site.apk
+npm run build:apk:org     # → dist-apk/EazyCount-v1.4-org.apk
+npm run build:apk:com     # → dist-apk/EazyCount-v1.4-com.apk
 ```
 
 `build-apk-for-site.mjs` 会把 `capacitor.config.json` 的 `server.url` 与 `www/index.html` 的重连地址临时改成对应域名，跑 `cap sync` + Gradle release，把产物拷到 `dist-apk/`，最后还原这两个文件。首次构建要下载 Gradle 和依赖，等几分钟。
@@ -47,15 +47,24 @@ npm run build:apk:com     # → dist-apk/EazyCount-v1.2-com.apk
 | `android/keystore.properties` | `storeFile=../../keystore/eazycount.keystore`、`storePassword`、`keyAlias`、`keyPassword` |
 | `android/local.properties` | `sdk.dir=<Android SDK 路径>`（如 `C:\Android\sdk`） |
 
+> ⚠️ **出包前先确认 `c168_mobile/app` 没有混入这次不打算发的改动**（2026-10-06 踩过）：若
+> `package.json` / `android/app/capacitor.build.gradle` 里出现别的插件（例如另一条并行任务装的
+> `@aparajita/capacitor-biometric-auth`），`cap sync` 会把它们连进 Android 工程 —— 实测包体从
+> 5.5 MB 涨到 7.9 MB（多出 androidx.biometric + Material）且多一项生物识别权限。
+> 自查：`git status --short c168_mobile/app`；或从独立工作树出包
+> （`git worktree add --detach ../count168-apkbuild HEAD`，并把 gitignore 的 `keystore/`、
+> `android/keystore.properties`、`android/local.properties` 拷进去）。
+> 出包后核对：`aapt2 dump badging dist-apk/*.apk | grep uses-permission` 不该出现多余权限。
+
 需要 Node ≥ 20、JDK ≥ 17（AGP 8.13 / Gradle 8.14）；SDK 组件：`platform-tools`、`platforms;android-36`、`build-tools;36.0.0`。
 
 **上传（三个域名各放自己那份，不要跨域名复制）**
 
 ```bash
 cd c168_mobile/app && scp -i ~/.ssh/count168-ec2.pem \
-  dist-apk/EazyCount-v1.2-site.apk ec2-user@56.68.48.190:/var/www/count168/app/EazyCount-v1.2.apk
-scp -i ~/.ssh/count168-ec2.pem dist-apk/EazyCount-v1.2-org.apk ec2-user@56.68.48.190:/var/www/count168.org/app/EazyCount-v1.2.apk
-scp -i ~/.ssh/count168-ec2.pem dist-apk/EazyCount-v1.2-com.apk ec2-user@56.68.48.190:/var/www/count168.com/app/EazyCount-v1.2.apk
+  dist-apk/EazyCount-v1.4-site.apk ec2-user@56.68.48.190:/var/www/count168/app/EazyCount-v1.4.apk
+scp -i ~/.ssh/count168-ec2.pem dist-apk/EazyCount-v1.4-org.apk ec2-user@56.68.48.190:/var/www/count168.org/app/EazyCount-v1.4.apk
+scp -i ~/.ssh/count168-ec2.pem dist-apk/EazyCount-v1.4-com.apk ec2-user@56.68.48.190:/var/www/count168.com/app/EazyCount-v1.4.apk
 ```
 
 （上传新版后可删掉各目录里的旧包；`deploy/publish-app-page.sh` 只发布 install-page 里的页面文件，**不会**再复制/借用 APK。）
@@ -86,7 +95,11 @@ scp -i ~/.ssh/count168-ec2.pem dist-apk/EazyCount-v1.2-com.apk ec2-user@56.68.48
     -dname "CN=EazyCount, OU=Mobile, O=Count168, C=MY"
   ```
 - ⚠️ 换签名后已安装用户必须卸载重装(签名不一致无法覆盖安装)。
-- ⚠️ **当前状态：本机、服务器、四个仓库的 git 历史里都找不到这把密钥**（等待从当年出包的机器/备份找回）。找回前不要用新密钥重建，否则已安装用户都要卸载重装一次。
+- ⚠️ **当前状态（2026-10-06 更新）：密钥已找回。** 本机 `keystore/eazycount.keystore` 是从服务器
+  `/home/ec2-user/eazycount.keystore.backup-2026-09-11` 取回的；证书 SHA-256
+  `95:3D:3D:44:1E:E4:5A:DB:B9:0E:40:AD:8F:5D:A2:66:CE:EE:F8:92:5B:25:6D:0D:5F:4F:59:30:D7:12:D0:19`
+  与线上 v1.2 包内签名指纹一致，因此新包能直接覆盖升级（v1.3 / v1.4 都已验证同源）。
+  **请再备份一份到密码管理器 / OneDrive**（密钥不进 git）。上面那条重建命令只在确认旧密钥真丢了之后才用。
 
 ## 新电脑环境搭建
 
@@ -131,7 +144,7 @@ cd c168_mobile/app && npm i && node make-qr.mjs   # 同时生成 qr.png 与 qr-o
 
 **APK**(不进 git,`c168_mobile/app/*.apk`、`dist-apk/` 已 gitignore)
 
-- **每个域名一份**、各自指向自己的域名：用 `npm run build:apk:site|org|com` 出包后，把 `dist-apk/EazyCount-v1.2-<域名>.apk` 分别 scp 到 `/var/www/<域名目录>/app/EazyCount-v1.2.apk`（详见上面「日常出包」）；
+- **每个域名一份**、各自指向自己的域名：用 `npm run build:apk:site|org|com` 出包后，把 `dist-apk/EazyCount-v1.4-<域名>.apk` 分别 scp 到 `/var/www/<域名目录>/app/EazyCount-v1.4.apk`（详见上面「日常出包」）；
 - **绝不要把某个域名的包复制到别的域名**——包里的 `server.url` 是写死的，放错了用户登录后看到的就是另一个域名的数据；
 - 发新版：改 `android/app/build.gradle` 的 `versionCode`/`versionName` → 三个域名各出一次包（产物文件名会自动带上新版本号）→ 各自上传新文件、删旧文件，并同步更新 `install-page/index.html` 里的**版本号、大小文案和下载文件名**（3 处：Android 卡片的文案与链接、桌面卡片的下载按钮）。
 
@@ -144,7 +157,7 @@ curl -sI https://www.count168.org/app/ | head -1
 curl -sI https://www.count168.com/app/ | head -1
 # 各域名的 APK 可下载，且包内 server.url 指向自己（在服务器上跑）
 for d in count168 count168.org count168.com; do
-  python3 -c "import zipfile,sys;print('$d', zipfile.ZipFile('/var/www/$d/app/EazyCount-v1.2.apk').read('assets/capacitor.config.json').decode()[:200])"
+  python3 -c "import zipfile,sys;print('$d', zipfile.ZipFile('/var/www/$d/app/EazyCount-v1.4.apk').read('assets/capacitor.config.json').decode()[:200])"
 done
 ```
 
