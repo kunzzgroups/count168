@@ -352,8 +352,7 @@ async function runPasskeyLogin({ mediation, signal, credentialId } = {}) {
     return { ok: false, code: opt?.code || "OPTIONS_FAILED", message: opt?.message || "" };
   }
 
-  // 有本机凭据 ID 就限定它 —— 这是让 iOS 走 Face ID 而不是 NFC 安全密钥的关键。
-  // 没存过则退回到可发现凭据（空数组）。
+  // 有本机凭据 ID 就限定它（更精准）；没有则交给可发现凭据。
   const allowCredentials = credentialId
     ? [{ type: "public-key", id: b64urlToBytes(credentialId) }]
     : [];
@@ -369,6 +368,12 @@ async function runPasskeyLogin({ mediation, signal, credentialId } = {}) {
         timeout: opt.timeout,
         userVerification: opt.userVerification,
         allowCredentials,
+        // ⚠️ 关键：限定只能用**平台验证器**（Face ID / Touch ID / 系统指纹）。
+        //
+        // 不传这个时，iOS 在没找到平台凭据时会落到「外部安全密钥（NFC）」那条路
+        // —— 实机上弹了 “Use Security Key / Too many NFC devices found”，
+        // 点输入框也会弹。限定 platform 后 iOS 就不能走安全密钥。
+        authenticatorAttachment: "platform",
       },
     });
   } catch (err) {

@@ -19,6 +19,7 @@ import { registerDeviceToken } from "../../lib/deviceTokenApi.js";
 import { readLastCompanyId, writeLastCompanyId } from "../../lib/lastLoginPrefs.js";
 import {
   getPasskeyId,
+  hasPasskeyOnDevice,
   passkeyErrorMessage,
   startConditionalPasskeyLogin,
   tryImmediatePasskeyLogin,
@@ -404,27 +405,25 @@ export default function LoginPage() {
   /**
    * 登录页**不放任何生物识别按钮**（产品要求）。
    *
-   * ⚠️ 前提是**知道本机那把凭据的 ID**（getPasskeyId），而不是“注册过”。
-   * 为何这么严：传空 allowCredentials 调 get() 时，iOS 会落到「外部安全密钥（NFC）」
-   * 那条路 —— 实机上点一下输入框就弹 “Use Security Key / Too many NFC devices found”。
-   * 拿不到 ID 就不发这个请求，NFC 画面就不会再出现。
+   * 防 NFC 靠的是 authenticatorAttachment: "platform"（见 lib/webauthn.js），
+   * **不是**靠“必须有凭据 ID” —— 后者会让老注册彻底用不了。
    *
    * 两步走：
-   *   ① 先试一次「立即弹」—— 已知具体凭据时 iOS 会走 Face ID，
-   *      所以打开 App 就有机会直接刷脸（实机已验证过 iOS 会弹系统界面，不要求手势）；
+   *   ① 先试一次「立即弹」—— 实机已验证 iOS 会在页面加载时弹系统界面（不要求手势），
+   *      所以打开 App 就有机会直接刷脸；
    *   ② 不行就回退到条件式调解 —— 点一下账号栏，系统在自动填充栏里提示刷脸。
    */
   useEffect(() => {
     if (isNative()) return undefined;        // APK 走启动门禁，这里不做
 
-    // ⚠️ 前提是**知道本机那把凭据的 ID**，而不是“注册过”。
+    // 仅在**本机注册过** passkey 时动作。
     //
-    // 为什么：传空 allowCredentials 调 get() 时，iOS 会落到「外部安全密钥（NFC）」
-    // 那条路 —— 实机上点一下输入框就弹 “Use Security Key / Too many NFC devices found”。
-    // 只知道“注册过”但拿不到 ID，就会退化成空数组 → 又弹 NFC。
-    // 所以拿不到 ID 就**完全不发这个请求**，NFC 画面就不会再出现。
+    // 为何不再要求“必须知道凭据 ID”：已用 authenticatorAttachment: "platform"
+    // 把 iOS 限定在平台验证器上，不会再落到 NFC；而拿 ID 当门槛的代价是
+    // 老注册完全用不了（实机上就是“打开不弹任何东西”）。
+    if (!hasPasskeyOnDevice()) return undefined;
+
     const credentialId = getPasskeyId();
-    if (!credentialId) return undefined;
 
     const ac = new AbortController();
     let cancelled = false;
