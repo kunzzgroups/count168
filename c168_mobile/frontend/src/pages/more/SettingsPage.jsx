@@ -14,16 +14,16 @@ import { buildApiUrl } from "../../utils/apiUrl.js";
 import {
   clearToken,
   describeBiometry,
-  biometryReport,
   getDeviceId,
   getDeviceName,
+  isNative,
   loadToken,
   saveToken,
+  withTimeout,
 } from "../../lib/biometricStore.js";
 import { registerDeviceToken, revokeDeviceToken } from "../../lib/deviceTokenApi.js";
 import {
   createPasskey,
-  biometricDiagnostic,
   listPasskeys,
   passkeyErrorMessage,
   removeAllPasskeys,
@@ -58,8 +58,6 @@ export default function SettingsPage() {
   const [bioExpiresAt, setBioExpiresAt] = useState("");
   const [bioCount, setBioCount] = useState(0);
   const [bioBusy, setBioBusy] = useState(false);
-  // 仅“原生不可用”时填：APK 关了 web 调试拿不到 console，靠界面一行字诊断
-  const [bioUnavailableReason, setBioUnavailableReason] = useState("");
   const [bioError, setBioError] = useState("");
   /**
    * ⚠️ 临时诊断：**每次改动必须递增这个号**。
@@ -67,10 +65,12 @@ export default function SettingsPage() {
    * 为何需要它：iOS 主屏幕应用 / 安卓 WebView 会把 JS 留在内存里，
    * 从后台切回来不会重新加载 —— 于是“改了代码设备上却一模一样”。
    * 用户截图里的这个号能直接确定设备跑的是哪个包。
-   * 功能稳定后连同下面那行一起删。
+   * 功能稳下来后连同下面那行一起删。
+   *
+   * 初始值故意非空：如果连这一行都不显示，那就不是探测失败而是**包没更新**。
    */
-  const BIO_BUILD = "b7";
-  const [bioDiag, setBioDiag] = useState("");
+  const BIO_BUILD = "b8";
+  const [bioDiag, setBioDiag] = useState("boot");
   const i18n = useMemo(() => MORE_I18N[lang] || MORE_I18N.en, [lang]);
 
   const setLang = useCallback((next) => {
@@ -112,65 +112,96 @@ export default function SettingsPage() {
     }
   }, [navigate]);
 
-  // 探测本机能不能用生物识别、是否已开启。两端走不同判据，但对用户是同一个开关。
+  /**
+   * ────────────────────────────────────────────────────────────────────
+   * 生物识别可用性判定 —— **iOS 与安卓分开写**
+   * ────────────────────────────────────────────────────────────────────
+   *
+   * 判据直接照抄**登录页已经在跑通的那两条通路**，不另发明探测：
+   *
+   *   安卓  hooks/useBiometricUnlock.js ： isNative() → loadToken()
+   *   iOS   LoginPage.jsx 的 passkey 通路 ： !isNative() → hasPasskeyOnDevice()
+   *
+   * 为何必须照抄：登录页在两端都能用（iOS 人脸 / 安卓指纹），
+   * 说明那里的判据是对的。设置页之前自己用了两个探测，
+   * 而它们在真机上都会给出**与事实相反**的结果：
+   *   · checkBiometry() 在安卓上不应答 → 开关被置灰
+   *   · platformAuthenticatorAvailable() 在 iOS 上是假阴性 → 开关被置灰
+   */
+
+  /** 安卓：Capacitor 原生壳。判据与登录门禁**完全一致**。 */
+  const probeAndroid = useCallback(async () => {
+    // 凭据在 Keystore（device_token）。与 useBiometricUnlock 同一套。
+    const token = await withTimeout(loadToken(), 4000);
+    // 类型名只是装饰（Fingerprint / Face），**不参与可用性判断** ——
+    // 拿它当门槛就是之前安卓置灰的原因。
+    let label = "";
+    try {
+      label = await withTimeout(describeBiometry(), 3000);
+    } catch {
+      label = "";
+    }
+    return {
+      mode: "native",
+      // 在原生壳里就是支持的：同一台机器的登录页已经能用指纹。
+      supported: true,
+      enabled: Boolean(token),
+      label,
+      count: 0,
+      note: `token=${token ? "yes" : "no"}${label ? "" : " probe=none"}`,
+    };
+  }, []);
+
+  /** iOS：Safari「加到主屏幕」的网页。判据与登录页 passkey 通路一致。 */
+  const probeIos = useCallback(async () => {
+    const supported = webauthnSupported();
+    let count = 0;
+    if (supported) {
+      try {
+        const listed = await listPasskeys();
+        count = listed.count || 0;
+      } catch {
+        count = 0;
+      }
+    }
+    return {
+      mode: supported ? "passkey" : "none",
+      supported,
+      enabled: count > 0,
+      label: "",
+      count,
+      note: `wk=${supported ? 1 : 0} count=${count}`,
+    };
+  }, []);
+
+  // 探测本机能不能用生物识别、是否已开启。两端分开写，但对用户是同一个开关。
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      // ① **按平台切分**（这正是产品要的：“开关要去检测 iOS 还是安卓”）。
-      //
-      // 原生（安卓壳）用原生插件；网页（iOS 加到主屏幕）用 passkey。
-      // 平台判断只信 isNative() —— 它在包里只认 androidBridge / Capacitor.PluginHeaders，
-      // 而 PluginHeaders 只有原生壳会注入（@capacitor/core 只读不写），所以 iOS 上必为 false。
-      if (isNative()) {
-        const [label, storedToken] = await Promise.all([describeBiometry(), loadToken()]);
+      try {
+        const native = isNative();
+        const r = native ? await probeAndroid() : await probeIos();
         if (cancelled) return;
-        setBioMode("native");
-        setBioTypeLabel(label); // 只用于显示类型名（Fingerprint / Face），空着也能用
-        // ⚠️ **只要在原生壳里就算了支持**，不再拿 checkBiometry() 当门槛。
-        // 原因：登录页在同一台机器上能用指纹，证明插件是好的；
-        // 而 checkBiometry() 在安卓上报过不应答，拿它做门槛会把开关置灰。
-        // （“目前能不能用”应由 authenticate() 的真实报错回答，不是由一个探测回答。）
-        setBioSupported(true);
-        setBioEnabled(Boolean(storedToken));
-        // 探测无应答时只记一行诊断，不影响开关可用性
-        const report = label === "" ? await biometryReport() : "";
+        setBioMode(r.mode);
+        setBioTypeLabel(r.label || "");
+        setBioSupported(r.supported);
+        setBioEnabled(r.enabled);
+        setBioCount(r.count || 0);
+        setBioDiag(`native=${native ? 1 : 0} mode=${r.mode} sup=${r.supported ? 1 : 0} ${r.note}`);
+      } catch (err) {
+        // ⚠️ 探测自己抛错也必须留下痕迹，否则就是个沉默的死开关。
+        // 这正是之前几轮的现象：探测里调了一个没 import 的函数（isNative），
+        // ReferenceError 在第一行就抛出，诊断行一个字都没有 —— 看起来像
+        // “改什么都没用”，实际是这一段从来没跑过。
         if (cancelled) return;
-        if (report) setBioUnavailableReason(report);
-        setBioDiag(
-          `native=1 mode=native label="${label}" token=${storedToken ? "yes" : "no"} probe=${report || "ok"}`,
-        );
-        return;
+        setBioSupported(false);
+        setBioDiag(`THREW ${err?.message || err}`);
       }
-
-      // ② 网页端（iOS）：有 WebAuthn 就走 passkey。
-      //
-      // ⚠️ 门槛**只能是 webauthnSupported()**，不能再加 platformAuthenticatorAvailable()：
-      // 后者在 iOS 上会给假阴性（用户实际能注册并登录，探测却返回 false），
-      // 加了它 iOS 就置灰 —— 而且它在安卓 WebView 里也是 false，
-      // 结果两端全灰。见 webauthn.js 里该函数上方的告警。
-      if (webauthnSupported()) {
-        setBioMode("passkey");
-        setBioTypeLabel("");
-        setBioSupported(true);
-        const listed = await listPasskeys();
-        if (cancelled) return;
-        setBioCount(listed.count || 0);
-        setBioEnabled((listed.count || 0) > 0);
-        setBioDiag(`native=0 mode=passkey count=${listed.count || 0} wk=1`);
-        return;
-      }
-
-      // ③ 什么都不能用 → 开关置灰。
-      //    产品明确不要「30 天免登录」这种替代品，所以不再降级为别的功能。
-      setBioMode("none");
-      setBioTypeLabel("");
-      setBioSupported(false);
-      setBioDiag(`native=0 mode=none wk=0`);
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [probeAndroid, probeIos]);
 
   /** @param {boolean|undefined} next 显式目标值；不传则取反 */
   const toggleBiometric = useCallback(
@@ -333,16 +364,11 @@ export default function SettingsPage() {
               )}
             </div>
 
-            {/* 诊断行：本次排查专用，只在有内容时显示（功能稳下来后连同 BIO_BUILD 一起删） */}
+            {/* 诊断行：本次排查专用，初始值就是 "boot"，
+                所以只要这行不出现，就说明设备跑的不是新包（而不是探测失败）。
+                功能稳下来后连同 BIO_BUILD 一起删。 */}
             {bioDiag ? (
               <p className="m-more-settings-hint">{`[${BIO_BUILD}] ${bioDiag}`}</p>
-            ) : null}
-
-            {/* 不可用时给一行原因。
-                注意：条件里**不能**再带 !bioSupported —— 带上之后只要 bioSupported
-                为 true，这条原因就被自己藏掉了，出问题时什么都看不到。 */}
-            {bioUnavailableReason ? (
-              <p className="m-more-settings-hint">{`[${bioUnavailableReason}]`}</p>
             ) : null}
 
             {/* 只在真的出错时提示一行 */}
