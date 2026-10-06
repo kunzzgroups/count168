@@ -57,8 +57,11 @@ if ($userType === '') {
     $userType = strtolower((string) ($_SESSION['role'] ?? '')) === 'owner' ? 'owner' : 'user';
 }
 
-// 与 device_token_register_api.php 同一门槛：member 无二级密码概念，其余必须已通过
-if ($userType !== 'member' && ($_SESSION['secondary_password_verified'] ?? null) !== true) {
+// 与 device_token_register_api.php 同一门槛。
+// 用 pending() 而不是直接看标记：非 C168 的用户本来就不需要二级密码，
+// 标记可能因为会话恢复而为空，那是正常的，不应拦住他。
+if ($userType !== 'member'
+    && device_token_secondary_password_pending($pdo, $userType, $userId, $_SESSION)) {
     wa_regopt_fail('SECONDARY_PASSWORD_REQUIRED', 'Please verify your secondary password first.');
 }
 

@@ -61,8 +61,9 @@ if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) === 'POST') {
     if (trim((string) ($_POST['revoke_all'] ?? '')) !== '1') {
         wa_creds_fail('BAD_REQUEST', 'revoke_all=1 required');
     }
-    // 与注册同门槛：二级密码必须先通过
-    if ($userType !== 'member' && ($_SESSION['secondary_password_verified'] ?? null) !== true) {
+    // 与注册同门槛；用 pending() 而非直接看标记（非 C168 用户本来就不需要二级密码）
+    if ($userType !== 'member'
+        && device_token_secondary_password_pending($pdo, $userType, $userId, $_SESSION)) {
         wa_creds_fail('SECONDARY_PASSWORD_REQUIRED', 'Please verify your secondary password first.');
     }
     wa_ensure_table($pdo);

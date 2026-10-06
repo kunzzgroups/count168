@@ -176,9 +176,9 @@ session_user_payload_cache_clear();
 // ⑪ 二级密码策略（与指纹解锁同一开关，见 device_token.php 的常量说明）
 $redirect = device_token_secondary_password_redirect($pdo, $userType, $userId, $snapshot);
 if ($redirect !== null && DEVICE_TOKEN_TRUSTED_SKIPS_SECONDARY) {
-    $_SESSION['secondary_password_verified'] = true;
     $redirect = null;
 }
+device_token_apply_trusted_secondary_policy($pdo, $userType, $userId, $snapshot);
 if ($redirect === null) {
     $redirect = $userType === 'member' ? '/member' : '/dashboard';
 }

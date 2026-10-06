@@ -60,7 +60,8 @@ $userType = device_token_normalize_user_type((string) ($_SESSION['user_type'] ??
 if ($userType === '') {
     $userType = strtolower((string) ($_SESSION['role'] ?? '')) === 'owner' ? 'owner' : 'user';
 }
-if ($userType !== 'member' && ($_SESSION['secondary_password_verified'] ?? null) !== true) {
+if ($userType !== 'member'
+    && device_token_secondary_password_pending($pdo, $userType, $userId, $_SESSION)) {
     wa_regver_fail('SECONDARY_PASSWORD_REQUIRED', 'Please verify your secondary password first.');
 }
 

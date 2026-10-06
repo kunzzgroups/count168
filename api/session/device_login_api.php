@@ -136,14 +136,16 @@ session_user_payload_cache_clear();
 
 // 5) 二级密码（owner 一律需要；C168 的 user 且已设二级密码则需要）
 $redirect = device_token_secondary_password_redirect($pdo, $userType, $userId, $snapshot);
-
-// 受信任凭据放行二级密码。这一行是**唯一**让 owner 跳过
-// /owner-secondary-password 的地方，故意写在这里以便审计。
-// 策略与理由见 includes/device_token.php 的 DEVICE_TOKEN_TRUSTED_SKIPS_SECONDARY。
 if ($redirect !== null && DEVICE_TOKEN_TRUSTED_SKIPS_SECONDARY) {
-    $_SESSION['secondary_password_verified'] = true;
+    // 受信任凭据放行。这一行是**唯一**让 owner 跳过 /owner-secondary-password 的地方，
+    // 故意写在这里以便审计。策略见 device_token.php 的 DEVICE_TOKEN_TRUSTED_SKIPS_SECONDARY。
     $redirect = null;
 }
+
+// 无论是否需要二级密码，只要「不卡在二级密码上」就必须把标记置位 ——
+// 非 C168 的用户本来就不需要，标记也应为 true。
+// （曾经只在“需要”时才置位，导致会话被恢复后 passkey 接口误报“请先验证二级密码”。）
+device_token_apply_trusted_secondary_policy($pdo, $userType, $userId, $snapshot);
 
 if ($redirect === null) {
     $redirect = $userType === 'member' ? '/member' : '/dashboard';

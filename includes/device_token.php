@@ -859,6 +859,47 @@ function device_token_web_remember_issue(PDO $pdo, string $userType, int $userId
 }
 
 /**
+ * 二级密码**是否尚未满足**（true = 必须先过二级密码）。
+ *
+ * 判定与 session_check.php / current_user_api.php 一致：
+ * 只有 owner、以及所在公司为 C168 且已设二级密码的 user 才需要。
+ * 供 passkey / 设备令牌的注册与移除做门槛 —— 不能用「标记是否已置位」
+ * 直接当门槛，因为非 C168 用户本来就不会置位。
+ */
+function device_token_secondary_password_pending(
+    PDO $pdo,
+    string $userType,
+    int $userId,
+    array $snapshot
+): bool {
+    if (($snapshot['secondary_password_verified'] ?? null) === true) {
+        return false;
+    }
+
+    return device_token_secondary_password_redirect($pdo, $userType, $userId, $snapshot) !== null;
+}
+
+/**
+ * 受信任凭据（指纹解锁 / 网页记住我 / passkey）恢复会话后的二级密码收尾。
+ *
+ * ⚠️ 关键点：身份**本来就不需要**二级密码时也必须置位。
+ * 该标记的语义是「本会话不再卡在二级密码上」—— login_api.php 一直都是这么做的，
+ * 而当初恢复会话的路径只在“需要二级密码”时才置位，导致非 C168 的用户
+ * （例如 95 · IG）在会话被恢复后，注册/移除 passkey 会误报「请先验证二级密码」。
+ */
+function device_token_apply_trusted_secondary_policy(
+    PDO $pdo,
+    string $userType,
+    int $userId,
+    array $snapshot
+): void {
+    $needs = device_token_secondary_password_redirect($pdo, $userType, $userId, $snapshot) !== null;
+    if (!$needs || DEVICE_TOKEN_TRUSTED_SKIPS_SECONDARY) {
+        $_SESSION['secondary_password_verified'] = true;
+    }
+}
+
+/**
  * 用 remember_token cookie 恢复会话（网页端免登录），只处理 kind='web'。
  *
  * user 身份的旧路径（user.remember_token 明文列）由 current_user_api.php 自行处理并
@@ -914,12 +955,9 @@ function device_token_try_restore_from_cookie(PDO $pdo): bool
         return false;
     }
 
-    // 受信任凭据放行二级密码（同一策略，见 DEVICE_TOKEN_TRUSTED_SKIPS_SECONDARY 说明）。
-    // 注意：必须在 device_token_restore_session() **之后**设，因为还原会清掉这个标记。
-    if (DEVICE_TOKEN_TRUSTED_SKIPS_SECONDARY
-        && device_token_secondary_password_redirect($pdo, $userType, $userId, $snapshot) !== null) {
-        $_SESSION['secondary_password_verified'] = true;
-    }
+    // 受信任凭据的二级密码收尾（见 device_token_apply_trusted_secondary_policy 的说明）。
+    // 必须在 device_token_restore_session() **之后**调，因为还原会清掉这个标记。
+    device_token_apply_trusted_secondary_policy($pdo, $userType, $userId, $snapshot);
 
     device_token_touch($pdo, (int) $row['id']);
 

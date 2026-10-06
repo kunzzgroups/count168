@@ -79,9 +79,11 @@ if (auth_session_password_stale($pdo)) {
     device_register_fail('SESSION_STALE', 'Password was changed. Please login again.');
 }
 
-// 二级密码门槛：member 无此概念；owner / user 必须已通过。
-// login_api.php 在「不需要二级密码」的分支也会置 true，所以这个判断同时覆盖两种情况。
-if ($userType !== 'member' && ($_SESSION['secondary_password_verified'] ?? null) !== true) {
+// 二级密码门槛：member 无此概念；其余看**是否真的需要**。
+// 不能直接看标记是否置位 —— 非 C168 的用户本来就不需要二级密码，
+// 会话被恢复后标记为空是正常的，不应拦住他。
+if ($userType !== 'member'
+    && device_token_secondary_password_pending($pdo, $userType, $userId, $_SESSION)) {
     device_register_fail('SECONDARY_PASSWORD_REQUIRED', 'Please verify your secondary password first.');
 }
 

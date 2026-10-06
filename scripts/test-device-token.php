@@ -591,6 +591,42 @@ $_POST = $postBackup;
 $_COOKIE = $cookieBackup;
 $_SESSION = $sessionBackup;
 
+echo "\n=== 21. 受信任凭据的二级密码收尾 ===\n";
+// 回归用例：非 C168 的用户**本来就不需要**二级密码，标记也必须置位。
+// 曾经恢复会话的路径只在“需要”时才置位，导致这类用户（例如 95 · IG）
+// 在会话被恢复后注册/移除 passkey 会误报“请先验证二级密码”。
+$snapBank = ['user_id' => 11, 'user_type' => 'user', 'company_id' => 2, 'company_code' => 'BANK'];
+$snapC168User = ['user_id' => 11, 'user_type' => 'user', 'company_id' => 1, 'company_code' => 'C168'];
+
+unset($_SESSION['secondary_password_verified']);
+ok('（前置）非 C168 用户不需要二级密码',
+    device_token_secondary_password_redirect($pdo, 'user', 11, $snapBank) === null);
+device_token_apply_trusted_secondary_policy($pdo, 'user', 11, $snapBank);
+ok('★ 非 C168 用户恢复会话后标记被置位（回归）',
+    ($_SESSION['secondary_password_verified'] ?? null) === true);
+ok('置位后 pending() 为 false',
+    device_token_secondary_password_pending($pdo, 'user', 11, $snapBank) === false);
+
+// 真正需要的人仍必须被拦
+unset($_SESSION['secondary_password_verified']);
+ok('C168 且已设二级密码 → 需要跳转',
+    device_token_secondary_password_redirect($pdo, 'user', 11, $snapC168User) === '/user-secondary-password');
+ok('★ 标记为空时 pending() 为 true（真正需要的人仍被拦）',
+    device_token_secondary_password_pending($pdo, 'user', 11, $snapC168User) === true);
+ok('owner 始终需要',
+    device_token_secondary_password_redirect($pdo, 'owner', 7, []) === '/owner-secondary-password');
+
+$_SESSION['secondary_password_verified'] = true;
+// 注意：标记是从**传入的数组**里读的，而端点传的是 $_SESSION —— 这里必须传 $_SESSION
+ok('标记已置位时 C168 用户也不再 pending',
+    device_token_secondary_password_pending($pdo, 'user', 11, $_SESSION) === false);
+
+// 策略：需要且放行 → 也置位
+unset($_SESSION['secondary_password_verified']);
+device_token_apply_trusted_secondary_policy($pdo, 'owner', 7, []);
+ok('owner + 放行策略 → 标记置位（因为 DEVICE_TOKEN_TRUSTED_SKIPS_SECONDARY 为 true）',
+    ($_SESSION['secondary_password_verified'] ?? null) === true);
+
 // 收尾：不把测试库留在机器上
 $rootPdo->exec("DROP DATABASE IF EXISTS `$dbName`");
 
