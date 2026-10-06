@@ -15,6 +15,7 @@ import {
   loadToken,
   saveToken,
 } from "../../lib/biometricStore.js";
+import { nativeBiometricLogin } from "../../lib/biometricLogin.js";
 import { registerDeviceToken } from "../../lib/deviceTokenApi.js";
 import { readLastCompanyId, writeLastCompanyId } from "../../lib/lastLoginPrefs.js";
 import {
@@ -199,8 +200,9 @@ export default function LoginPage() {
   const [modal, setModal] = useState({ open: false, title: "Notice", message: "" });
   const [enroll, setEnroll] = useState({ open: false, targetPath: "", busy: false, error: "" });
   const [submitting, setSubmitting] = useState(false);
-  const [pkAvailable, setPkAvailable] = useState(false);
-  const [pkBusy, setPkBusy] = useState(false);
+  // 生物识别登录入口："native"（APK 指纹）/ "web"（WebAuthn passkey）/ "none"
+  const [bioMode, setBioMode] = useState("none");
+  const [bioBusy, setBioBusy] = useState(false);
   const [lang, setLang] = useState(() => readLoginLang());
 
   const verifyTimeoutRef = useRef(null);
@@ -384,30 +386,37 @@ export default function LoginPage() {
    * 必须定义在 finishLogin / showNotice **之后** —— 依赖数组在渲染时求值，
    * 放前面会撞上 const 的暂时性死区。
    */
-  const handlePasskeyLogin = useCallback(async () => {
-    setPkBusy(true);
+  const handleBioLogin = useCallback(async () => {
+    setBioBusy(true);
     try {
-      const result = await loginWithPasskey();
+      const result =
+        bioMode === "native" ? await nativeBiometricLogin() : await loginWithPasskey();
       if (!result.ok) {
         // 带原因/错误码地提示 —— 只显示“失败”会让用户和我都无从而适
-        showNotice(passkeyErrorMessage(lang, result.code, i18n.passkeyFailed));
+        showNotice(passkeyErrorMessage(lang, result.code, i18n.bioFailed));
         return;
       }
       await finishLogin(result.redirect || "/dashboard");
     } finally {
-      setPkBusy(false);
+      setBioBusy(false);
     }
-  }, [finishLogin, i18n.passkeyFailed, lang, showNotice]);
+  }, [bioMode, finishLogin, i18n.bioFailed, lang, showNotice]);
   useAuthBackground();
 
-  // 「用 Face ID / 指纹登录」入口：只在浏览器支持 WebAuthn 且存在平台验证器时出现。
-  // 安卓 APK 的 WebView 不支持 WebAuthn，所以那边不会显示（它走指纹解锁那条路）。
+  // 登录页的生物识别入口。两端判据不同，但对用户是同一个按钮：
+  //   原生（APK）—— 本地还存着凭据才值得显示（否则没什么可用）
+  //   浏览器 —— WebAuthn 可用且本机已录入生物识别
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      if (isNative()) {
+        const stored = await loadToken();
+        if (!cancelled) setBioMode(stored ? "native" : "none");
+        return;
+      }
       if (!webauthnSupported()) return;
       const available = await platformAuthenticatorAvailable();
-      if (!cancelled) setPkAvailable(available);
+      if (!cancelled) setBioMode(available ? "web" : "none");
     })();
     return () => {
       cancelled = true;
@@ -662,15 +671,15 @@ export default function LoginPage() {
                   <span>{submitting ? i18n.loggingIn : i18n.login}</span>
                 </button>
 
-                {pkAvailable ? (
+                {bioMode !== "none" ? (
                   <button
                     type="button"
                     className="sc-login-passkey-btn"
-                    onClick={() => void handlePasskeyLogin()}
-                    disabled={submitting || pkBusy}
+                    onClick={() => void handleBioLogin()}
+                    disabled={submitting || bioBusy}
                   >
                     <i className="fas fa-fingerprint" aria-hidden="true" />
-                    <span>{pkBusy ? i18n.passkeyWorking : i18n.passkeyLogin}</span>
+                    <span>{bioBusy ? i18n.bioWorking : i18n.bioLogin}</span>
                   </button>
                 ) : null}
 

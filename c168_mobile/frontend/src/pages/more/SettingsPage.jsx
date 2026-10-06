@@ -45,16 +45,15 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [lang, setLangState] = useSyncedLoginLang();
   const [theme, setThemeState] = useState(() => readLoginTheme());
+  // 生物识别解锁：**一个开关，两种后端**（用户不需要知道背后是哪套机制）
+  //   原生（安卓 APK）→ device_token：本地凭据 + 系统指纹弹窗
+  //   浏览器（含 iPhone）→ WebAuthn passkey：服务端公钥，抗钓鱼
+  const [bioMode, setBioMode] = useState("none"); // "native" | "web" | "none"
   const [bioSupported, setBioSupported] = useState(false);
   const [bioEnabled, setBioEnabled] = useState(false);
   const [bioTypeLabel, setBioTypeLabel] = useState("");
   const [bioBusy, setBioBusy] = useState(false);
   const [bioError, setBioError] = useState("");
-  const [pkSupported, setPkSupported] = useState(false);
-  const [pkCount, setPkCount] = useState(0);
-  const [pkMax, setPkMax] = useState(0);
-  const [pkBusy, setPkBusy] = useState(false);
-  const [pkError, setPkError] = useState("");
   const i18n = useMemo(() => MORE_I18N[lang] || MORE_I18N.en, [lang]);
 
   const setLang = useCallback((next) => {
@@ -94,29 +93,66 @@ export default function SettingsPage() {
     }
   }, [navigate]);
 
-  // 探测本机是否支持生物识别，以及是否已开启（本地令牌存在即视为已开启）
+  // 探测本机能不能用生物识别、是否已开启。两端走不同判据，但对用户是同一个开关。
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      // describeBiometry() 不可用时返回空串，所以它同时就是“是否支持”的判据
-      const [label, storedToken] = await Promise.all([describeBiometry(), loadToken()]);
+      if (isNative()) {
+        // 原生：describeBiometry() 不可用时返回空串，兼作“是否支持”的判据
+        const [label, storedToken] = await Promise.all([describeBiometry(), loadToken()]);
+        if (cancelled) return;
+        setBioMode("native");
+        setBioTypeLabel(label);
+        setBioSupported(label !== "");
+        setBioEnabled(Boolean(storedToken));
+        return;
+      }
+
+      // 浏览器：靠 WebAuthn。安卓 WebView 不支持它，所以这里只会是真浏览器。
+      const supported = webauthnSupported() && (await platformAuthenticatorAvailable());
       if (cancelled) return;
-      setBioTypeLabel(label);
-      setBioSupported(label !== "");
-      setBioEnabled(Boolean(storedToken));
+      setBioMode("web");
+      setBioTypeLabel("");
+      setBioSupported(supported);
+      if (!supported) return;
+      const listed = await listPasskeys();
+      if (cancelled) return;
+      setBioEnabled((listed.count || 0) > 0);
     })();
     return () => {
       cancelled = true;
     };
   }, []);
 
-  /** @param {boolean|undefined} next 显式目标值；不传则取反（开关直接传 true/false） */
+  /** @param {boolean|undefined} next 显式目标值；不传则取反 */
   const toggleBiometric = useCallback(
     async (next) => {
       const enable = next === undefined ? !bioEnabled : Boolean(next);
       setBioBusy(true);
       setBioError("");
       try {
+        if (bioMode === "web") {
+          if (enable) {
+            const created = await createPasskey(getDeviceName());
+            if (!created.ok) {
+              // 不再把 NotAllowedError 当成“用户取消”而静默吞掉：
+              // 它同时也是“没有用户手势 / 超时 / 策略不允许”的代码。
+              setBioError(passkeyErrorMessage(lang, created.code, i18n.bioEnableFailed));
+              return;
+            }
+          } else {
+            const removed = await removeAllPasskeys();
+            if (!removed.ok) {
+              setBioError(removed.message || i18n.bioEnableFailed || "Could not turn off.");
+              return;
+            }
+          }
+          const listed = await listPasskeys();
+          setBioEnabled((listed.count || 0) > 0);
+          return;
+        }
+
+        // 原生路径
         if (!enable) {
           // 关闭：先吐销服务端令牌，再清本地 Keystore
           await revokeDeviceToken({ deviceId: getDeviceId() });
@@ -133,74 +169,20 @@ export default function SettingsPage() {
           setBioError(
             issued.code === "DEVICE_LIMIT"
               ? i18n.bioDeviceLimit || "Too many devices."
-              : i18n.bioEnableFailed || "Could not enable fingerprint unlock.",
+              : i18n.bioEnableFailed || "Could not enable biometric unlock.",
           );
           return;
         }
         await saveToken(issued.token);
         setBioEnabled(true);
       } catch {
-        setBioError(i18n.bioEnableFailed || "Could not enable fingerprint unlock.");
+        setBioError(i18n.bioEnableFailed || "Could not enable biometric unlock.");
       } finally {
         setBioBusy(false);
       }
     },
-    [bioEnabled, i18n.bioDeviceLimit, i18n.bioEnableFailed],
+    [bioEnabled, bioMode, i18n.bioDeviceLimit, i18n.bioEnableFailed, lang],
   );
-
-  // passkey（WebAuthn）探测 + 已注册数量。安卓 APK 的 WebView 不支持 WebAuthn，
-  // 所以那边这一栏不会出现 —— 它是留给 iPhone / 桌面浏览器的。
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const supported = webauthnSupported() && (await platformAuthenticatorAvailable());
-      if (cancelled) return;
-      setPkSupported(supported);
-      if (!supported) return;
-      const listed = await listPasskeys();
-      if (cancelled) return;
-      setPkCount(listed.count || 0);
-      setPkMax(listed.max || 0);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const handleAddPasskey = useCallback(async () => {
-    setPkBusy(true);
-    setPkError("");
-    try {
-      const result = await createPasskey(getDeviceName());
-      if (!result.ok) {
-        // 不再把 NotAllowedError 当成“用户取消”而静默吞掉：
-        // 它同时也是“没有用户手势 / 超时 / 策略不允许”的代码。
-        // 任何失败都要给一个带原因（或错误码）的提示。
-        setPkError(passkeyErrorMessage(lang, result.code, i18n.passkeyAddFailed));
-        return;
-      }
-      const listed = await listPasskeys();
-      setPkCount(listed.count || 0);
-      setPkMax(listed.max || 0);
-    } finally {
-      setPkBusy(false);
-    }
-  }, [i18n.passkeyAddFailed, lang]);
-
-  const handleRemovePasskeys = useCallback(async () => {
-    setPkBusy(true);
-    setPkError("");
-    try {
-      const result = await removeAllPasskeys();
-      if (!result.ok) {
-        setPkError(result.message || i18n.passkeyRemoveFailed || "Could not remove.");
-        return;
-      }
-      setPkCount(0);
-    } finally {
-      setPkBusy(false);
-    }
-  }, [i18n.passkeyRemoveFailed]);
 
   const companyCode = String(me?.company_code || me?.company_id || "").toUpperCase();
   const groupId = String(me?.login_group_id || me?.login_identifier || "").toUpperCase();
@@ -265,10 +247,15 @@ export default function SettingsPage() {
               </div>
             </section>
 
+          {/*
+           * 生物识别解锁：**只有一个开关**。
+           * 背后是 device_token（原生）还是 WebAuthn passkey（浏览器）由平台决定，
+           * 用户不需要看到两栏、也不需要知道差别。
+           */}
           <section className="m-more-settings-group" aria-label={i18n.biometric || "Biometric Unlock"}>
             <div className="m-more-settings-row">
-              <span>{i18n.biometric || "Fingerprint unlock"}</span>
-              {/* 开关始终渲染：位置要能看到。浏览器 / 旧 APK 上置灰，由下方说明解释原因 */}
+              <span>{i18n.biometric || "Biometric Unlock"}</span>
+              {/* 开关始终渲染：位置要能看到。不支持的环境置灰，由下方说明解释原因 */}
               {bioBusy ? (
                 <i className="fas fa-spinner fa-spin" aria-hidden="true" />
               ) : (
@@ -287,7 +274,10 @@ export default function SettingsPage() {
               {!bioSupported
                 ? i18n.bioUnsupportedHint || ""
                 : bioEnabled
-                  ? [i18n.bioEnabledHint || "", bioTypeLabel].filter(Boolean).join(" · ")
+                  ? // 原生才报具体的指纹/人脸类型；浏览器端由 passkeyErrorMessage 在出错时说明
+                    [i18n.bioEnabledHint || "", bioMode === "native" ? bioTypeLabel : ""]
+                      .filter(Boolean)
+                      .join(" · ")
                   : i18n.bioDisabledHint || ""}
             </p>
 
@@ -297,45 +287,6 @@ export default function SettingsPage() {
               </p>
             ) : null}
           </section>
-
-          {/* passkey 是另一种登录方式（服务端公钥认证），不是「给本地凭据加把锁」，
-              所以单独一张卡片，不与上面的 Biometric Unlock 混在一起。 */}
-          {pkSupported ? (
-            <section className="m-more-settings-group" aria-label={i18n.passkey || "Face ID / Passkey"}>
-              <div className="m-more-settings-row">
-                <span>{i18n.passkey || "Face ID / Passkey"}</span>
-                {pkBusy ? (
-                  <i className="fas fa-spinner fa-spin" aria-hidden="true" />
-                ) : pkCount > 0 ? (
-                  <button
-                    type="button"
-                    className="m-more-settings-link m-more-settings-link--danger"
-                    onClick={() => void handleRemovePasskeys()}
-                  >
-                    {i18n.passkeyRemove || "Remove"}
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="m-more-settings-link"
-                    onClick={() => void handleAddPasskey()}
-                  >
-                    {i18n.passkeyRegister || "Add"}
-                  </button>
-                )}
-              </div>
-              <p className="m-more-settings-hint">
-                {pkCount > 0
-                  ? `${i18n.passkeyRegistered || "Registered"} · ${pkCount}/${pkMax}`
-                  : i18n.passkeyHintOff || ""}
-              </p>
-              {pkError ? (
-                <p className="m-more-settings-hint m-more-settings-hint--error" role="alert">
-                  {pkError}
-                </p>
-              ) : null}
-            </section>
-          ) : null}
 
             <button type="button" className="m-more-logout tap-scale" onClick={() => void logout()}>
               <i className="fas fa-right-from-bracket" aria-hidden="true" />

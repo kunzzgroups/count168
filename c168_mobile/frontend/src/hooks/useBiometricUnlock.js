@@ -13,14 +13,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  authenticate,
-  clearToken,
-  getDeviceId,
-  isNative,
-  loadToken,
-} from "../lib/biometricStore.js";
-import { loginWithDeviceToken } from "../lib/deviceTokenApi.js";
+import { clearToken, getDeviceId, isNative } from "../lib/biometricStore.js";
+import { nativeBiometricLogin } from "../lib/biometricLogin.js";
 
 export const GATE_CHECKING = "checking";
 export const GATE_LOCKED = "locked";
@@ -73,25 +67,35 @@ export function useBiometricUnlock() {
     setBusy(true);
     setFailure(null);
     try {
-      // 1) 系统生物识别（文案与语言在 biometricStore.authenticate 里统一处理）
-      await authenticate();
+      const result = await nativeBiometricLogin();
 
-      // 2) 取出 Keystore 里的令牌
-      const token = await loadToken();
-      if (!token) {
-        // Keystore 密钥失效（改了指纹/锁屏密码、重装、恢复备份）
-        await goDisabled(true);
-        return;
-      }
-
-      // 3) 换会话
-      const result = await loginWithDeviceToken({ token, deviceId: getDeviceId() });
       if (result.ok) {
         setState(GATE_UNLOCKED);
         navigate(result.redirect, { replace: true });
         return;
       }
 
+      if (result.stage === "credential") {
+        // 本地没有凭据，或 Keystore 密钥失效
+        // （改指纹/锁屏密码、重装、恢复备份都会导致失效）
+        await goDisabled(true);
+        return;
+      }
+
+      if (result.stage === "biometric") {
+        if (BIOMETRIC_UNUSABLE_CODES.has(result.code)) {
+          // 这台设备做不了生物识别了，不要卡在重试上
+          await goDisabled(true);
+          return;
+        }
+        // 用户取消 / 指纹不匹配 / 临时锁定：留在锁屏
+        setAttempts((n) => n + 1);
+        setFailure({ kind: FAIL_BIOMETRIC, code: result.code, message: "" });
+        setState(GATE_LOCKED);
+        return;
+      }
+
+      // stage === "server"
       if (PERMANENT_FAILURE_CODES.has(result.code)) {
         await goDisabled(true);
         return;
@@ -101,19 +105,6 @@ export function useBiometricUnlock() {
       // 把服务端的 message 一并带上 —— 维护公告这类信息比“暂时不可用”有用得多。
       setAttempts((n) => n + 1);
       setFailure({ kind: FAIL_SERVER, code: result.code || "UNKNOWN", message: result.message || "" });
-      setState(GATE_LOCKED);
-    } catch (err) {
-      const code = String(err?.code || "cancelled");
-
-      if (BIOMETRIC_UNUSABLE_CODES.has(code)) {
-        // 这台设备做不了生物识别了，不要卡在重试上
-        await goDisabled(true);
-        return;
-      }
-
-      // 用户取消 / 指纹不匹配 / 临时锁定：留在锁屏
-      setAttempts((n) => n + 1);
-      setFailure({ kind: FAIL_BIOMETRIC, code, message: "" });
       setState(GATE_LOCKED);
     } finally {
       setBusy(false);
