@@ -117,9 +117,25 @@ export function useBiometricUnlock() {
     }
   }, [goDisabled, navigate]);
 
-  /** 用户点「用密码登录」：清掉本地凭据，回密码登录 */
+  /**
+   * 用户点「用密码登录」。
+   *
+   * ⚠️ **不清凭据**（之前传的是 true，这是个真 bug）：
+   *
+   * 「这一次用密码」不等于「把生物识别关掉」。用户可能只是因为
+   * 脸在暗处没识出来、或指纹湿了。原来这一下会把 Keystore 里的令牌删掉，
+   * 后果有两个，实机都报过：
+   *   1. 模型里 enabled=1 而 Keystore 里 token=no —— 状态与实际对不上，
+   *      生物识别再也登录不了；
+   *   2. 登录页的判断是“没有令牌就弹开启引导” → 于是**每次密码登录都弹引导**。
+   *
+   * 保留凭据后：本次会话仍然正常地走密码登录（state 置 DISABLED 就够），
+   * 下次冷启动该弹生物识别还弹 —— 那正是功能本身。
+   * 真正失效的凭据（令牌过期 / 被吐销）由 unlock() 里的
+   * PERMANENT_FAILURE_CODES 分支清理，那里清才是对的。
+   */
   const usePasswordInstead = useCallback(async () => {
-    await goDisabled(true);
+    await goDisabled(false);
     navigate("/login", { replace: true });
   }, [goDisabled, navigate]);
 

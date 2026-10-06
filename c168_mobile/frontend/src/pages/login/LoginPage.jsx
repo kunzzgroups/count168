@@ -18,6 +18,7 @@ import {
   writeBioOptOut,
 } from "../../lib/biometricStore.js";
 import { registerDeviceToken } from "../../lib/deviceTokenApi.js";
+import { ensureSettings } from "../../lib/biometricSettings.js";
 import { readLastCompanyId, writeLastCompanyId } from "../../lib/lastLoginPrefs.js";
 import {
   getPasskeyId,
@@ -347,14 +348,16 @@ export default function LoginPage() {
   const finishLogin = useCallback(
     async (targetPath) => {
       try {
-        // 已经拒绝过就不弹。少了这个条件，只要本地没令牌就每次登录都问，
-        // 用户点过「暂不开启」、或在设置里主动关掉过，都还会被反复追问。
-        if (
-          isNative() &&
-          !readBioOptOut() &&
-          (await biometricAvailable()) &&
-          !(await loadToken())
-        ) {
+        // 弹「开启」引导的充要条件。三个条件缺一不可：
+        //   1. 在原生壳里（网页端走 passkey，不弹这个）
+        //   2. 用户没有拒绝过（否则每次登录都追问 —— 已经出过这个 bug）
+        //   3. **模型里本来就没开**。模型说已开却还弹「开启」，
+        //      会让人以为功能被关掉了；那种情况属于「修复」而不是「开启」，
+        //      用另一个表述处理，不能复用这个弹窗。
+        const token = await loadToken();
+        const settings = ensureSettings(Boolean(token));
+        const shouldOffer = isNative() && !readBioOptOut() && !settings.enabled && !token;
+        if (shouldOffer && (await biometricAvailable())) {
           setEnroll({ open: true, targetPath, busy: false, error: "" });
           return;
         }

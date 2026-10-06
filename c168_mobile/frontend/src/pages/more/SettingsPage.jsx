@@ -82,7 +82,7 @@ export default function SettingsPage() {
    *
    * 初始值故意非空：如果连这一行都不显示，那就不是探测失败而是**包没更新**。
    */
-  const BIO_BUILD = "b14";
+  const BIO_BUILD = "b15";
   const [bioDiag, setBioDiag] = useState("boot");
   const i18n = useMemo(() => MORE_I18N[lang] || MORE_I18N.en, [lang]);
 
@@ -225,7 +225,12 @@ export default function SettingsPage() {
         // enabled 不再由“有没有凭据”**推导** —— 那是两个来源（BUG-4）；
         // 凭据是否存在本次只作为迁移时的校验输入。
         const settings = ensureSettings(Boolean(r.credentialPresent));
-        const plan = resolveBiometric(settings, r.capability);
+        // 把凭据是否存在一并交给 resolver：模型里 enabled=1 但 Keystore 没令牌时，
+        // 必须报 NO_CREDENTIAL，而不是假装能启动。
+        const plan = resolveBiometric(settings, {
+          ...(r.capability || {}),
+          credentialPresent: Boolean(r.credentialPresent),
+        });
         if (cancelled) return;
         setBioEnabled(settings.enabled);
         setBioModality(settings.method);

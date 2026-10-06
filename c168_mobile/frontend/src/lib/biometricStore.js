@@ -23,6 +23,7 @@ import { BiometricAuth, BiometryType, AndroidBiometryStrength } from "@aparajita
 import { SecureStorage } from "@aparajita/capacitor-secure-storage";
 import { readLoginLang } from "./loginLang.js";
 import {
+  CAP,
   METHOD,
   disabledSettings,
   ensureSettings,
@@ -276,8 +277,12 @@ export async function authenticate() {
     credentialPresent = false;
   }
   const settings = ensureSettings(credentialPresent);
-  // 强度只能由 resolver 决定 —— 它是唯一允许做这个判断的地方
-  const plan = resolveBiometric(settings, { state: "UNKNOWN" });
+  // 强度只能由 resolver 决定 —— 它是唯一允许做这个判断的地方。
+  // credentialPresent 如实传入：这里能走到说明确实有凭据。
+  const plan = resolveBiometric(settings, {
+    state: CAP.UNKNOWN,
+    credentialPresent,
+  });
   // 文案尽量短（系统弹窗上方已显示应用名），而且**不写具体方式**。
   //
   // 实机反馈：用户选了人脸，文案写「验证人脸」，但安卓弹出来的仍是指纹界面

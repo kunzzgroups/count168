@@ -156,6 +156,16 @@ export function resolveBiometric(settings, capability) {
       break;
   }
 
+  // 凭据（device_token / passkey）是**运行时前提**，不是用户偏好：
+  // 没有它 → 启动不了，但**绝不改写 method**（规格 §7）。
+  // 注意 `undefined` 代表**未知**（例如 iOS 的凭据在服务端）→ 允许启动。
+  //
+  // 为何需要它：实机出现过模型里 enabled=1 而 Keystore 里 token=no
+  // —— 模型说开着、凭据却不在，那个状态不可能登录成功，必须被说出来。
+  if (cap.credentialPresent === false) {
+    return { ...intent, reason: "NO_CREDENTIAL" };
+  }
+
   // 能力「已知可用」时，再按具体模态过滤。
   // 注意只认 `=== false`：null / undefined 代表**未知**，
   // 不能当成不可用 —— 把未知塌缩成 false 正是之前两次功能全瞎的原因。

@@ -191,6 +191,31 @@ test("用例8：锁屏的指纹图标只能出现在 method 条件分支里", ()
   );
 });
 
+test("凭据缺失：说得出来，且不改写偏好（实机出过 enabled=1 而 token=no）", () => {
+  const r = resolveBiometric(face, { state: CAP.AVAILABLE, credentialPresent: false });
+  assert.equal(r.method, METHOD.FACE, "偏好被改写");
+  assert.equal(r.startable, false);
+  assert.equal(r.reason, "NO_CREDENTIAL");
+});
+
+test("凭据未知（如 iOS 凭据在服务端）不得当成缺失", () => {
+  assert.equal(resolveBiometric(face, { state: CAP.AVAILABLE }).startable, true);
+  assert.equal(
+    resolveBiometric(face, { state: CAP.AVAILABLE, credentialPresent: undefined }).startable,
+    true,
+  );
+});
+
+test("「用密码登录」不得清掉凭据（否则每次密码登录都会重复弹开启引导）", () => {
+  const hook = src("hooks", "useBiometricUnlock.js");
+  const body = hook.slice(hook.indexOf("const usePasswordInstead"), hook.indexOf("const usePasswordInstead") + 320);
+  assert.equal(
+    /goDisabled\(true\)/.test(body),
+    false,
+    "usePasswordInstead 仍在清凭据 —— 会让 enabled=1 与 token=no 对不上，并反复弹引导",
+  );
+});
+
 /* ── 运行 ─────────────────────────────────────────────────────────── */
 
 let failed = 0;
