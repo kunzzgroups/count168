@@ -74,7 +74,7 @@ export default function SettingsPage() {
    *
    * 初始值故意非空：如果连这一行都不显示，那就不是探测失败而是**包没更新**。
    */
-  const BIO_BUILD = "b10";
+  const BIO_BUILD = "b11";
   const [bioDiag, setBioDiag] = useState("boot");
   const i18n = useMemo(() => MORE_I18N[lang] || MORE_I18N.en, [lang]);
 
@@ -395,6 +395,7 @@ export default function SettingsPage() {
                 <MobileOnOffSwitch
                   on={bioModality === "face"}
                   disabled={false}
+                  wide
                   onChange={(next) => {
                     const value = next ? "face" : "fingerprint";
                     writeModalityPref(value);

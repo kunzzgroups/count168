@@ -226,17 +226,13 @@ export async function biometryModalities() {
 export async function authenticate() {
   const lang = readLoginLang();
   const modality = readModalityPref();
-  // 文案尽量短：系统弹窗本来就在上方显示应用名，
-  // 再写一遍 “to EazyCount” 只会多折一行，让弹窗看起来拥挤。
-  // 文案要跟着用户选的方式走 —— 选的是人脸却写「验证指纹」是错的。
-  const reason =
-    lang === "zh"
-      ? modality === "face"
-        ? "验证人脸以登录"
-        : "验证指纹以登录"
-      : modality === "face"
-        ? "Verify your face to sign in"
-        : "Verify your fingerprint to sign in";
+  // 文案尽量短（系统弹窗上方已显示应用名），而且**不写具体方式**。
+  //
+  // 实机反馈：用户选了人脸，文案写「验证人脸」，但安卓弹出来的仍是指纹界面
+  // —— 因为安卓没法强制只出人脸（见 readModalityPref 上方说明）；
+  // 两种都录入时，系统总是优先给「强」的那个，通常就是指纹。
+  // 文案跟着偏好走就会与系统实际界面矛盾，所以这里只说「要验证身份」。
+  const reason = lang === "zh" ? "验证身份以登录" : "Verify your identity to sign in";
 
   await BiometricAuth.authenticate({
     reason,

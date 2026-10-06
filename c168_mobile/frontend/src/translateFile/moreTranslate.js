@@ -20,8 +20,11 @@ export const MORE_I18N = {
     bioDeviceLimit: "Could not enable biometric unlock. Please try again.",
     bioPasskeys: "Passkeys",
     // 安卓专用：让用户选指纹还是人脸（见 lib/biometricStore.js 的 readModalityPref）
+    //
+    // 标签必须诚实：选人脸时安卓仍可能弹指纹（平台无「只用人脸」开关），
+    // 写成单纯的 “Face” 就是承诺了做不到的事。
     bioModalityFingerprint: "Fingerprint",
-    bioModalityFace: "Face",
+    bioModalityFace: "Face or fingerprint",
     bioModality: "Unlock with",
     rememberDevice: "Stay signed in",
     rememberDeviceOnHint: "This device stays signed in for 30 days",
@@ -70,9 +73,10 @@ export const MORE_I18N = {
     rememberDeviceExpires: "至",
     rememberDeviceOffHint: "开启后本设备 30 天内不必再输密码。",
     bioSafariHint: "iPhone 上要用 Face ID，请改用 Safari 打开本页：",
-    // 安卓专用：让用户选指纹还是人脸
+    // 安卓专用：让用户选指纹还是人脸。
+    // 标签必须诚实：选人脸时安卓仍可能弹指纹（平台无「只用人脸」开关）。
     bioModalityFingerprint: "指纹",
-    bioModalityFace: "人脸",
+    bioModalityFace: "人脸或指纹",
     bioModality: "解锁方式",
     bioOpenInSafari: "在 Safari 中打开",
     bioEnabledHint: "用指纹 / 人脸直接登录",

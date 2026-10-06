@@ -99,3 +99,29 @@
 .mobile-onoff-switch .mobile-lang-switch__seg:disabled {
   opacity: 0.55;
 }
+
+/**
+ * 标签比 On/Off 长时（例如「指纹 / 人脸或指纹」）自适应宽度。
+ *
+ * 为何必须加：基础样式是固定 `width: 7.6rem`（每段约 61px），
+ * 而现有标签最长只有 Light / Dark（5 字符）——
+ * “Fingerprint”（11 字符）就已经会溢出。
+ *
+ * 宽度 auto + grid 的 `1fr 1fr`：两段保持**等宽**，
+ * 所以滑块（宽 50%、translateX(100%)）依旧对得齐。
+ *
+ * `flex-shrink: 0` 不能省：所在行是 flex 且 justify-content: space-between，
+ * 一旦左侧标题换行，开关会被压窄 —— 而 `1fr` 在宽度不够时会退化成
+ * 按内容分配，两段就不等宽了，滑块随之错位（已用无头浏览器量到：
+ * 段=[86,103] 而非 [103,103]）。宁可让标题换行，也不能挤开关。
+ */
+.mobile-onoff-switch--wide {
+  width: auto;
+  min-width: 8rem;
+  flex-shrink: 0;
+}
+
+.mobile-onoff-switch--wide .mobile-lang-switch__seg {
+  padding: 0 0.7rem;
+  white-space: nowrap;
+}

@@ -16,10 +16,13 @@ export default function MobileOnOffSwitch({
   onLabel = "On",
   offLabel = "Off",
   disabled = false,
+  wide = false,
 }) {
   return (
     <div
-      className="mobile-lang-switch mobile-lang-switch--light mobile-onoff-switch"
+      className={`mobile-lang-switch mobile-lang-switch--light mobile-onoff-switch${
+        wide ? " mobile-onoff-switch--wide" : ""
+      }`}
       role="group"
       aria-label={ariaLabel}
       data-on={on ? "on" : "off"}
