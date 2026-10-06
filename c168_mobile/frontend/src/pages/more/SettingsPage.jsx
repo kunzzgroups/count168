@@ -61,8 +61,6 @@ export default function SettingsPage() {
   const [bioExpiresAt, setBioExpiresAt] = useState("");
   const [bioCount, setBioCount] = useState(0);
   const [bioBusy, setBioBusy] = useState(false);
-  /** 设备**同时**具备指纹与人脸硬件 → 才显示「指纹 / 人脸」选择（安卓） */
-  const [bioChooseModality, setBioChooseModality] = useState(false);
   /** 用户选的是 fingerprint | face，存本机（见 lib/biometricStore.js 的 readModalityPref） */
   const [bioModality, setBioModality] = useState(() => readModalityPref());
   const [bioError, setBioError] = useState("");
@@ -76,7 +74,7 @@ export default function SettingsPage() {
    *
    * 初始值故意非空：如果连这一行都不显示，那就不是探测失败而是**包没更新**。
    */
-  const BIO_BUILD = "b9";
+  const BIO_BUILD = "b10";
   const [bioDiag, setBioDiag] = useState("boot");
   const i18n = useMemo(() => MORE_I18N[lang] || MORE_I18N.en, [lang]);
 
@@ -200,7 +198,6 @@ export default function SettingsPage() {
         setBioSupported(r.supported);
         setBioEnabled(r.enabled);
         setBioCount(r.count || 0);
-        setBioChooseModality(Boolean(r.both));
         setBioDiag(`native=${native ? 1 : 0} mode=${r.mode} sup=${r.supported ? 1 : 0} ${r.note}`);
       } catch (err) {
         // ⚠️ 探测自己抛错也必须留下痕迹，否则就是个沉默的死开关。
@@ -379,15 +376,20 @@ export default function SettingsPage() {
             </div>
 
             {/*
-             * 安卓专用：设备**同时**有指纹与人脸硬件时，让用户选一个。
+             * 安卓专用：让用户选「指纹」还是「人脸」。
              *
-             * 为何放到「开启之后」：这是解锁时的行为偏好，未开启时没有意义。
+             * ⚠️ 这里**故意不依赖任何探测**（曾经用 checkBiometry().biometryTypes
+             * 判断“有没有两种硬件” —— 而 checkBiometry() 在安卓上报过不应答，
+             * 一旦不应答就永远不会显示这一行）。
              *
-             * ⚠️ 能落地的程度不一样（见 lib/biometricStore.js 的 readModalityPref）：
-             *   选指纹 → 传 strong → 真的只出指纹
-             *   选人脸 → 只能传 weak → 系统可能仍给指纹（安卓无「只用人脸」开关）
+             * 不靠探测也不会出错，因为这只是个**偏好**：
+             *   选指纹 → 传 strong（只出指纹）
+             *   选人脸 → 传 weak；手机没录入人脸时，系统会自动退回指纹，不会卡住。
+             *
+             * 也不等开关先打开 —— 用户的第一反应就是进设置找这个选项，
+             * 藏在“必须先开启”后面会让人以为没做。
              */}
-            {bioMode === "native" && bioChooseModality && bioEnabled ? (
+            {bioMode === "native" ? (
               <div className="m-more-settings-row">
                 <span>{i18n.bioModality || "Unlock with"}</span>
                 <MobileOnOffSwitch
