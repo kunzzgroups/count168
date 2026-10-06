@@ -49,7 +49,23 @@ function ensurePrefix() {
 /** 是否跑在 Capacitor 原生壳（APK）里。网页 / PWA 一律 false。 */
 export function isNative() {
   try {
-    return Capacitor.isNativePlatform() === true;
+    // ⚠️ 不能只用 Capacitor.isNativePlatform()。
+    //
+    // 它内部把 `window.webkit.messageHandlers.bridge` 的存在当作 iOS 原生壳，
+    // 但 **iOS 的 WebKit 环境（包括从 Safari「添加到主屏幕」的独立 App）也会暴露它** ——
+    // 结果网页端被误判成原生，设置页走进原生分支，显示“设备没有指纹/人脸”并置灰。
+    // （这是真实发生过的 bug，用户截图里就是这条文案。）
+    //
+    // 只信「确实接上了原生桥」的两个证据：
+    //   ① androidBridge —— 只有 Capacitor 安卓壳注入
+    //   ② Capacitor.PluginHeaders —— 由原生 capacitor.js 注入，
+    //      @capacitor/core 只读不写，浏览器里永远是 undefined
+    if (typeof window.androidBridge !== "undefined") {
+      return true;
+    }
+    const headers = window.Capacitor?.PluginHeaders;
+
+    return Array.isArray(headers) && headers.length > 0;
   } catch {
     return false;
   }

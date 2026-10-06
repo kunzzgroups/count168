@@ -59,6 +59,7 @@ export default function SettingsPage() {
   const [bioEnabled, setBioEnabled] = useState(false);
   const [bioTypeLabel, setBioTypeLabel] = useState("");
   const [bioExpiresAt, setBioExpiresAt] = useState("");
+  const [bioCount, setBioCount] = useState(0);
   const [bioBusy, setBioBusy] = useState(false);
   // 诊断串：探测失败时一并显示，用于定位到底是哪个条件不成立。
   // 我在本机无法测 iOS，所以先靠这个换取确定性；定了因就可以删。
@@ -130,6 +131,7 @@ export default function SettingsPage() {
         setBioSupported(true);
         const listed = await listPasskeys();
         if (cancelled) return;
+        setBioCount(listed.count || 0);
         setBioEnabled((listed.count || 0) > 0);
         return;
       }
@@ -175,6 +177,7 @@ export default function SettingsPage() {
             }
           }
           const listed = await listPasskeys();
+          setBioCount(listed.count || 0);
           setBioEnabled((listed.count || 0) > 0);
           return;
         }
@@ -226,9 +229,7 @@ export default function SettingsPage() {
   const bioLabel =
     bioMode === "remember" ? i18n.rememberDevice || "Stay signed in" : i18n.biometric;
   let bioHint = "";
-  if (!bioSupported) {
-    bioHint = i18n.bioUnsupportedNativeHint || "";
-  } else if (bioMode === "remember") {
+  if (bioMode === "remember") {
     bioHint = bioEnabled
       ? [
           i18n.rememberDeviceOnHint || "",
@@ -237,11 +238,18 @@ export default function SettingsPage() {
           .filter(Boolean)
           .join(" · ")
       : i18n.rememberDeviceOffHint || "";
+  } else if (!bioSupported) {
+    // 只有原生分支可能走到这里：设备没录入指纹/人脸，或 APK 里没有插件
+    bioHint = i18n.bioUnsupportedNativeHint || "";
   } else if (!bioEnabled) {
     bioHint = i18n.bioDisabledHint || "";
   } else {
-    // 原生才报具体的指纹/人脸类型
-    bioHint = [i18n.bioEnabledHint || "", bioMode === "native" ? bioTypeLabel : ""]
+    // 原生报具体的指纹/人脸类型；passkey 模式报已保存的数量
+    bioHint = [
+      i18n.bioEnabledHint || "",
+      bioMode === "native" ? bioTypeLabel : "",
+      bioMode === "passkey" ? `${i18n.bioPasskeys || ""} ${bioCount}` : "",
+    ]
       .filter(Boolean)
       .join(" · ");
   }
