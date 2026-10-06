@@ -18,6 +18,13 @@ export const MORE_I18N = {
       "Turn on to sign in with Face ID or your fingerprint instead of typing the password.",
     bioEnableFailed: "Could not enable biometric unlock.",
     bioDeviceLimit: "Could not enable biometric unlock. Please try again.",
+    rememberDevice: "Stay signed in",
+    rememberDeviceOnHint: "This device stays signed in for 30 days",
+    rememberDeviceExpires: "until",
+    rememberDeviceOffHint:
+      "Turn on to stay signed in on this device for 30 days — no password to type.",
+    bioSafariHint: "To use Face ID on iPhone, open this page in Safari:",
+    bioOpenInSafari: "Open in Safari",
     more: "More",
     moreSubtitle: "Tools and settings",
     report: "Report",
@@ -53,8 +60,12 @@ export const MORE_I18N = {
       "你是从「添加到主屏幕」打开的吧？iOS 的独立 App 里不支持 passkey，请用 Safari 打开本页。",
     bioUnsupportedWebHint:
       "此浏览器不支持 passkey 登录。iPhone 需要 Safari 16 以上。",
-    bioUnsupportedWebHint:
-      "此浏览器不支持 passkey 登录。iPhone 需要 Safari 16 以上；若是从「添加到主屏幕」打开，请改用 Safari。",
+    rememberDevice: "保持登录",
+    rememberDeviceOnHint: "本设备 30 天内不必再输密码",
+    rememberDeviceExpires: "至",
+    rememberDeviceOffHint: "开启后本设备 30 天内不必再输密码。",
+    bioSafariHint: "iPhone 上要用 Face ID，请改用 Safari 打开本页：",
+    bioOpenInSafari: "在 Safari 中打开",
     bioEnabledHint: "用指纹 / 人脸直接登录",
     bioDisabledHint: "开启后用指纹 / 人脸登录，不必再输密码。",
     bioEnableFailed: "开启生物识别解锁失败。",

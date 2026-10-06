@@ -900,6 +900,47 @@ function device_token_apply_trusted_secondary_policy(
 }
 
 /**
+ * 当前浏览器是否已「保持登录」，是则返回到期时间。
+ *
+ * 两种机制都算：
+ *   ① device_token kind='web'（设置页开关 / passkey 环境）
+ *   ② 旧的 user.remember_token 明文列（登录页勾「记住我」产生，仅 user 身份）
+ *
+ * 为什么要两种都查：设置页要显示真实状态，而用户可能是在登录页勾的
+ * 「记住我」，也可能是在设置页开的开关 —— 两者对用户是同一个意思。
+ */
+function remember_device_expires_at(PDO $pdo, string $userType, int $userId): ?string
+{
+    $cookie = (string) ($_COOKIE['remember_token'] ?? '');
+    if ($cookie === '') {
+        return null;
+    }
+
+    $resolved = device_token_resolve($pdo, $cookie, null, DEVICE_TOKEN_KIND_WEB);
+    if ($resolved['ok']) {
+        return (string) ($resolved['row']['expires_at'] ?? '') ?: null;
+    }
+
+    if ($userType === 'user') {
+        try {
+            $stmt = $pdo->prepare(
+                'SELECT remember_token_expires FROM user
+                 WHERE id = ? AND remember_token = ? AND remember_token_expires > NOW() LIMIT 1'
+            );
+            $stmt->execute([$userId, $cookie]);
+            $expires = $stmt->fetchColumn();
+            if ($expires !== false && $expires !== null && $expires !== '') {
+                return (string) $expires;
+            }
+        } catch (Throwable $e) {
+            error_log('remember_device_expires_at legacy lookup failed: ' . $e->getMessage());
+        }
+    }
+
+    return null;
+}
+
+/**
  * 用 remember_token cookie 恢复会话（网页端免登录），只处理 kind='web'。
  *
  * user 身份的旧路径（user.remember_token 明文列）由 current_user_api.php 自行处理并

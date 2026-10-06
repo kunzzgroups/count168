@@ -18,10 +18,14 @@ import {
   loadToken,
   saveToken,
 } from "../../lib/biometricStore.js";
-import { registerDeviceToken, revokeDeviceToken } from "../../lib/deviceTokenApi.js";
+import {
+  getRememberDevice,
+  registerDeviceToken,
+  revokeDeviceToken,
+  setRememberDevice,
+} from "../../lib/deviceTokenApi.js";
 import {
   createPasskey,
-  isStandaloneWebApp,
   listPasskeys,
   passkeyErrorMessage,
   removeAllPasskeys,
@@ -46,13 +50,15 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [lang, setLangState] = useSyncedLoginLang();
   const [theme, setThemeState] = useState(() => readLoginTheme());
-  // 生物识别解锁：**一个开关，两种后端**（用户不需要知道背后是哪套机制）
+  // 生物识别解锁：**一个开关，三种后端**（用户不需要知道背后是哪套机制）
   //   原生（安卓 APK）→ device_token：本地凭据 + 系统指纹弹窗
-  //   浏览器（含 iPhone）→ WebAuthn passkey：服务端公钥，抗钓鱼
-  const [bioMode, setBioMode] = useState("none"); // "native" | "web" | "none"
+  //   浏览器有 WebAuthn → passkey：服务端公钥，抗钓鱼
+  //   浏览器没 WebAuthn（iOS 独立 App）→ 「保持登录」：30 天免密
+  const [bioMode, setBioMode] = useState("none"); // "native" | "passkey" | "remember"
   const [bioSupported, setBioSupported] = useState(false);
   const [bioEnabled, setBioEnabled] = useState(false);
   const [bioTypeLabel, setBioTypeLabel] = useState("");
+  const [bioExpiresAt, setBioExpiresAt] = useState("");
   const [bioBusy, setBioBusy] = useState(false);
   // 诊断串：探测失败时一并显示，用于定位到底是哪个条件不成立。
   // 我在本机无法测 iOS，所以先靠这个换取确定性；定了因就可以删。
@@ -112,25 +118,33 @@ export default function SettingsPage() {
         return;
       }
 
-      // 浏览器：只要支持 WebAuthn 就允许开关。
+      // 浏览器：有 WebAuthn 就走 passkey。
       //
       // 为什么**不**再把 platformAuthenticatorAvailable() 当门槛：
       // 它在 iOS 上会给出假阴性（用户实际能成功注册 passkey，但该探测返回 false），
       // 结果是开关被永久置灰、功能看着“不存在”。宁可放开开关，
       // 让真正尝试时的错误说清楚原因（错误已按码映射为可读提示）。
-      const supported = webauthnSupported();
-      if (cancelled) return;
-      setBioMode("web");
-      setBioTypeLabel("");
-      setBioSupported(supported);
-      if (!supported) {
-        // 关键：把不成立的条件记下来，否则只能说“不支持”而无从下手
-        setBioDiag(webauthnDiagnostic());
+      if (webauthnSupported()) {
+        setBioMode("passkey");
+        setBioTypeLabel("");
+        setBioSupported(true);
+        const listed = await listPasskeys();
+        if (cancelled) return;
+        setBioEnabled((listed.count || 0) > 0);
         return;
       }
-      const listed = await listPasskeys();
+
+      // 没有 WebAuthn —— 典型就是 iOS 的「添加到主屏幕」独立 App。
+      // 那里永远做不了 Face ID，但「不必再输密码」这个结果可以用 30 天免密给到，
+      // 所以这一行改叫「保持登录」，开关控制免登录凭据。
+      setBioMode("remember");
+      setBioTypeLabel("");
+      setBioSupported(true);
+      setBioDiag(webauthnDiagnostic());
+      const remembered = await getRememberDevice();
       if (cancelled) return;
-      setBioEnabled((listed.count || 0) > 0);
+      setBioEnabled(remembered.enabled === true);
+      setBioExpiresAt(remembered.expiresAt || "");
     })();
     return () => {
       cancelled = true;
@@ -144,7 +158,7 @@ export default function SettingsPage() {
       setBioBusy(true);
       setBioError("");
       try {
-        if (bioMode === "web") {
+        if (bioMode === "passkey") {
           if (enable) {
             const created = await createPasskey(getDeviceName());
             if (!created.ok) {
@@ -162,6 +176,17 @@ export default function SettingsPage() {
           }
           const listed = await listPasskeys();
           setBioEnabled((listed.count || 0) > 0);
+          return;
+        }
+
+        if (bioMode === "remember") {
+          const result = await setRememberDevice({ enabled: enable });
+          if (!result.ok) {
+            setBioError(result.message || i18n.bioEnableFailed || "Could not change this setting.");
+            return;
+          }
+          setBioEnabled(result.enabled);
+          setBioExpiresAt(result.expiresAt || "");
           return;
         }
 
@@ -196,6 +221,31 @@ export default function SettingsPage() {
     },
     [bioEnabled, bioMode, i18n.bioDeviceLimit, i18n.bioEnableFailed, lang],
   );
+
+  // ── 生物识别那一行的派生文案（三种后端共用一行，所以标题与说明跟着模式变）──
+  const bioLabel =
+    bioMode === "remember" ? i18n.rememberDevice || "Stay signed in" : i18n.biometric;
+  let bioHint = "";
+  if (!bioSupported) {
+    bioHint = i18n.bioUnsupportedNativeHint || "";
+  } else if (bioMode === "remember") {
+    bioHint = bioEnabled
+      ? [
+          i18n.rememberDeviceOnHint || "",
+          bioExpiresAt ? `${i18n.rememberDeviceExpires || ""} ${bioExpiresAt}` : "",
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : i18n.rememberDeviceOffHint || "";
+  } else if (!bioEnabled) {
+    bioHint = i18n.bioDisabledHint || "";
+  } else {
+    // 原生才报具体的指纹/人脸类型
+    bioHint = [i18n.bioEnabledHint || "", bioMode === "native" ? bioTypeLabel : ""]
+      .filter(Boolean)
+      .join(" · ");
+  }
+  const currentUrl = typeof window !== "undefined" ? window.location.href : "";
 
   const companyCode = String(me?.company_code || me?.company_id || "").toUpperCase();
   const groupId = String(me?.login_group_id || me?.login_identifier || "").toUpperCase();
@@ -265,10 +315,10 @@ export default function SettingsPage() {
            * 背后是 device_token（原生）还是 WebAuthn passkey（浏览器）由平台决定，
            * 用户不需要看到两栏、也不需要知道差别。
            */}
-          <section className="m-more-settings-group" aria-label={i18n.biometric || "Biometric Unlock"}>
+          <section className="m-more-settings-group" aria-label={bioLabel || "Biometric Unlock"}>
             <div className="m-more-settings-row">
-              <span>{i18n.biometric || "Biometric Unlock"}</span>
-              {/* 开关始终渲染：位置要能看到。不支持的环境置灰，由下方说明解释原因 */}
+              <span>{bioLabel || "Biometric Unlock"}</span>
+              {/* 开关始终渲染：位置要能看到 */}
               {bioBusy ? (
                 <i className="fas fa-spinner fa-spin" aria-hidden="true" />
               ) : (
@@ -276,29 +326,32 @@ export default function SettingsPage() {
                   on={bioEnabled}
                   disabled={!bioSupported}
                   onChange={(next) => void toggleBiometric(next)}
-                  ariaLabel={i18n.biometric || "Biometric Unlock"}
+                  ariaLabel={bioLabel || "Biometric Unlock"}
                   onLabel={i18n.bioOn || "On"}
                   offLabel={i18n.bioOff || "Off"}
                 />
               )}
             </div>
 
-            <p className="m-more-settings-hint">
-              {!bioSupported
-                ? (bioMode === "native"
-                    ? i18n.bioUnsupportedNativeHint
-                    : isStandaloneWebApp()
-                      ? i18n.bioUnsupportedStandaloneHint
-                      : i18n.bioUnsupportedWebHint) || ""
-                : bioEnabled
-                  ? // 原生才报具体的指纹/人脸类型
-                    [i18n.bioEnabledHint || "", bioMode === "native" ? bioTypeLabel : ""]
-                      .filter(Boolean)
-                      .join(" · ")
-                  : i18n.bioDisabledHint || ""}
-            </p>
+            <p className="m-more-settings-hint">{bioHint}</p>
 
-            {!bioSupported && bioDiag ? (
+            {/* 无 WebAuthn 时：说明 Face ID 只能在 Safari 里用，并给一个可直接打开的入口。
+                iOS 独立 App 里 target="_blank" 会交给 Safari 打开。 */}
+            {bioMode === "remember" ? (
+              <p className="m-more-settings-hint">
+                {i18n.bioSafariHint}{" "}
+                <a
+                  className="m-more-settings-link"
+                  href={currentUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {i18n.bioOpenInSafari}
+                </a>
+              </p>
+            ) : null}
+
+            {bioMode === "remember" && bioDiag ? (
               <p className="m-more-settings-hint">{`[${bioDiag}]`}</p>
             ) : null}
 

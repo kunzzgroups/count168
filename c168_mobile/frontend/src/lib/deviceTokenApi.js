@@ -87,6 +87,41 @@ export async function revokeDeviceToken({ deviceId, all } = {}) {
   return { ok: true, revoked: json.revoked ?? 0, scope: json.scope || "device" };
 }
 
+/**
+ * 「保持登录」（本设备 30 天免密）。
+ *
+ * 用在没有 WebAuthn 的环境（典型：iOS 的「添加到主屏幕」独立 App）——
+ * 那里永远做不了 Face ID，但「不必再输密码」这个结果仍然可以给到。
+ *
+ * GET  查当前状态；POST enabled=1|0 设置。
+ */
+export async function setRememberDevice({ enabled }) {
+  const { json } = await postForm("api/session/remember_device_api.php", {
+    enabled: enabled ? "1" : "0",
+  });
+  if (!json?.success) {
+    return { ok: false, code: json?.code || "UNKNOWN", message: json?.message || "" };
+  }
+  return { ok: true, enabled: json.enabled === true, expiresAt: json.expires_at || "" };
+}
+
+/** 当前浏览器是否已「保持登录」 */
+export async function getRememberDevice() {
+  try {
+    const res = await fetch(buildApiUrl("api/session/remember_device_api.php"), {
+      credentials: "include",
+      cache: "no-store",
+    });
+    const json = await res.json();
+    if (!res.ok || !json?.success) {
+      return { ok: false, enabled: false, expiresAt: "" };
+    }
+    return { ok: true, enabled: json.enabled === true, expiresAt: json.expires_at || "" };
+  } catch {
+    return { ok: false, enabled: false, expiresAt: "" };
+  }
+}
+
 /** 已授权设备列表 */
 export async function listDeviceTokens({ deviceId } = {}) {
   const url = buildApiUrl("api/session/device_tokens_api.php");
