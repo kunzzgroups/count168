@@ -36,6 +36,7 @@ function wa_logopt_fail(string $code, string $message): void
 
 try {
     require_once __DIR__ . '/../../includes/webauthn.php';
+    wa_install_error_handler('webauthn_login_options');
 } catch (Throwable $e) {
     error_log('webauthn_login_options bootstrap failed: ' . $e->getMessage());
     wa_logopt_fail('SERVER_ERROR', 'Server error');

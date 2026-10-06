@@ -295,6 +295,79 @@ ok('1 → 2 放行', wa_sign_count_ok(1, 2));
 ok('★ 2 → 1 拒绝（疑似克隆）', !wa_sign_count_ok(2, 1));
 ok('★ 5 → 5 拒绝', !wa_sign_count_ok(5, 5));
 
+echo "\n=== 11. 凭据存储（数据库层）===\n";
+// 为何要补这一节：密码学测得很足（前 10 节共 73 项），但**数据库层当时零覆盖**，
+// 结果一个签名写错（?string 而非 ?array）让生产注册 100% 失败，
+// 而前端只能看到“服务器未能验证”，定位绕了一大圈。
+$dbName = 'c168_wa_test';
+$pdo = null;
+try {
+    $rootPdo = new PDO('mysql:host=127.0.0.1;charset=utf8mb4', 'root', '', [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+    $rootPdo->exec("DROP DATABASE IF EXISTS `$dbName`");
+    $rootPdo->exec("CREATE DATABASE `$dbName` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+    $pdo = new PDO(
+        "mysql:host=127.0.0.1;dbname=$dbName;charset=utf8mb4",
+        'root',
+        '',
+        [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_EMULATE_PREPARES => false]
+    );
+} catch (Throwable $e) {
+    fwrite(STDERR, "无法连接本地 MySQL，跳过数据库层测试: " . $e->getMessage() . "\n");
+    $pdo = null;
+}
+
+if ($pdo instanceof PDO) {
+    $pdo->exec((string) file_get_contents($root . '/database/migrations/20261006_add_webauthn_credential.sql'));
+    ok('迁移脚本可执行', true);
+    wa_ensure_table($pdo);
+    ok('ensure_table 幂等', true);
+
+    $snapshot = ['user_id' => 218, 'user_type' => 'user', 'company_id' => 1, 'company_code' => 'C168'];
+
+    // ★ 回归用例：$snapshot 必须是**数组**。曾经签名写成 ?string，导致生产每次都 TypeError。
+    $savedRow = wa_credential_save($pdo, 'user', 218, $credId, $pem, 0, 'iPhone', $snapshot);
+    ok('★ 传数组快照可保存（回归：曾经签名是 ?string）', $savedRow['ok'], $savedRow['code'] ?? '');
+
+    $foundRow = wa_credential_find($pdo, $credId);
+    ok('可按二进制 credential_id 反查', is_array($foundRow) && (int) $foundRow['user_id'] === 218);
+    ok('快照被正确序列化保存', strpos((string) ($foundRow['session_snapshot'] ?? ''), '"user_id":218') !== false);
+    ok('公钥 PEM 保存正确', strpos((string) ($foundRow['public_key_pem'] ?? ''), WA_PEM_PREFIX) === 0);
+    ok('活跃计数为 1', wa_credential_count_active($pdo, 'user', 218) === 1);
+    ok('ids 列表含该凭据', in_array($credId, wa_credential_ids($pdo, 'user', 218), true));
+
+    $againRow = wa_credential_save($pdo, 'user', 218, $credId, $pem, 0, 'iPhone 2', $snapshot);
+    ok('重复注册同一凭据成功', $againRow['ok']);
+    ok('仍是 1 行（uk_credential 覆盖而非新增）', wa_credential_count_active($pdo, 'user', 218) === 1);
+    ok('设备名被更新', (wa_credential_find($pdo, $credId)['device_name'] ?? '') === 'iPhone 2');
+
+    ok('非 PEM 公钥被拒',
+        !wa_credential_save($pdo, 'user', 218, random_bytes(16), 'not a pem', 0, 'x', $snapshot)['ok']);
+    ok('空 credential_id 被拒',
+        !wa_credential_save($pdo, 'user', 218, '', $pem, 0, 'x', $snapshot)['ok']);
+
+    $listRows = wa_credential_list($pdo, 'user', 218);
+    ok('list 返回 1 条且标记 active', count($listRows) === 1 && (int) $listRows[0]['is_active'] === 1);
+
+    wa_credential_touch($pdo, (int) $foundRow['id'], 7);
+    ok('touch 写入 signCount', (int) wa_credential_find($pdo, $credId)['sign_count'] === 7);
+
+    ok('吊销全部返回 1', wa_credential_revoke_all($pdo, 'user', 218) === 1);
+    ok('吊销后查不到（find 只返回未吊销）', wa_credential_find($pdo, $credId) === null);
+    ok('吊销后活跃计数为 0', wa_credential_count_active($pdo, 'user', 218) === 0);
+    ok('重复吊销返回 0', wa_credential_revoke_all($pdo, 'user', 218) === 0);
+
+    for ($i = 0; $i < WA_MAX_CREDENTIALS; $i++) {
+        wa_credential_save($pdo, 'member', 21, random_bytes(20), $pem, 0, "d$i", $snapshot);
+    }
+    ok('达到上限', wa_credential_count_active($pdo, 'member', 21) === WA_MAX_CREDENTIALS);
+    $overRow = wa_credential_save($pdo, 'member', 21, random_bytes(20), $pem, 0, 'over', $snapshot);
+    ok('超上限返回 CREDENTIAL_LIMIT', !$overRow['ok'] && $overRow['code'] === 'CREDENTIAL_LIMIT');
+
+    ok('不同账号互不影响（user 218 已清空）', wa_credential_count_active($pdo, 'user', 218) === 0);
+
+    $rootPdo->exec("DROP DATABASE IF EXISTS `$dbName`");
+}
+
 echo "\n============================\n";
 echo "PASS: $pass   FAIL: $fail\n";
 echo "============================\n";

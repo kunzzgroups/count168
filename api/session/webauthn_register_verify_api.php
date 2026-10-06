@@ -36,6 +36,7 @@ $pdo = null;
 try {
     require_once __DIR__ . '/../../includes/config.php';
     require_once __DIR__ . '/../../includes/webauthn.php';
+    wa_install_error_handler('webauthn_register_verify');
     require_once __DIR__ . '/../../includes/device_token.php';
 } catch (Throwable $e) {
     error_log('webauthn_register_verify bootstrap failed: ' . $e->getMessage());

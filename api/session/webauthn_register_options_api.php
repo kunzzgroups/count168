@@ -35,6 +35,7 @@ $pdo = null;
 try {
     require_once __DIR__ . '/../../includes/config.php';
     require_once __DIR__ . '/../../includes/webauthn.php';
+    wa_install_error_handler('webauthn_register_options');
     require_once __DIR__ . '/../../includes/device_token.php';
     require_once __DIR__ . '/../../includes/auth_invalidation.php';
 } catch (Throwable $e) {

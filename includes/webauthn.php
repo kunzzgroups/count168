@@ -517,6 +517,63 @@ function wa_sign_count_ok(int $stored, int $received): bool
 /* ────────────────────────── 挑战（一次性，存 session） ────────────────────────── */
 
 /**
+ * 把未捕获异常 / 致命错误变成 JSON，而不是 500 HTML。
+ *
+ * 为何必须：API 返回 HTML 时前端的 JSON.parse 会失败，于是只能显示
+ * “服务器未能验证”这种无从下手的信息 —— 定位一个真实的 TypeError 因此绕了一大圈
+ * （最后是翻服务端日志才找到的）。有了它，任何异常都以带 code 的 JSON 返回，
+ * 前端就能直接给出可读原因。
+ *
+ * 故意**不**把异常原文回给客户端（会泄露路径与内部结构），只记服务端日志。
+ */
+function wa_install_error_handler(string $endpoint): void
+{
+    static $installed = false;
+    if ($installed) {
+        return;
+    }
+    $installed = true;
+
+    $emit = static function (string $summary) use ($endpoint): void {
+        error_log(sprintf('[%s] %s', $endpoint, $summary));
+        if (!headers_sent()) {
+            header('Content-Type: application/json; charset=utf-8');
+        }
+        if (ob_get_level() > 0) {
+            ob_clean();
+        }
+        echo json_encode([
+            'success' => false,
+            'status'  => 'error',
+            'code'    => 'SERVER_ERROR',
+            'message' => 'Server error',
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
+    };
+
+    set_exception_handler(static function (Throwable $e) use ($emit): void {
+        $emit(sprintf(
+            '%s: %s @ %s:%d',
+            get_class($e),
+            $e->getMessage(),
+            basename($e->getFile()),
+            $e->getLine()
+        ));
+    });
+
+    register_shutdown_function(static function () use ($emit): void {
+        $err = error_get_last();
+        if ($err !== null && in_array(
+            $err['type'],
+            [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR],
+            true
+        )) {
+            $emit(sprintf('FATAL %s @ %s:%d', $err['message'], basename($err['file']), $err['line']));
+        }
+    });
+}
+
+/**
  * 挑战存在 session 的自定义键。
  * 下划线开头很重要：device_token_capture_session() 会跳过 `_` 前缀的键，
  * 所以挑战不会被写进会话快照。
@@ -630,6 +687,11 @@ function wa_credential_count_active(PDO $pdo, string $userType, int $userId): in
 /**
  * 保存（或覆盖）一条凭据。
  *
+ * ⚠️ $snapshot 必须是 **array**（与 device_token_issue 一致）。
+ * 这里曾误写成 ?string，而调用方传的是 device_token_capture_session() 的数组，
+ * 于是生产环境每次注册都抛 TypeError → 500 → 前端只能显示“服务器未能验证”。
+ * 教训：密码学测得很足，但数据库层当时零覆盖 —— 现在有了。
+ *
  * @param array<string,mixed>|null $snapshot 注册时的身份会话快照；登录时用它恢复会话
  * @return array{ok:bool,code:string}
  */
@@ -641,7 +703,7 @@ function wa_credential_save(
     string $publicKeyPem,
     int $signCount,
     ?string $deviceName,
-    ?string $snapshot
+    ?array $snapshot
 ): array {
     if ($credentialId === '' || $credentialId === null) {
         return ['ok' => false, 'code' => 'BAD_CREDENTIAL_ID'];
