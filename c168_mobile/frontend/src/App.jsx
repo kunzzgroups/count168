@@ -6,6 +6,7 @@ import SecondaryPasswordPage from "./pages/login/SecondaryPasswordPage.jsx";
 import StubPage from "./pages/StubPage.jsx";
 import MemberPage from "./pages/member/MemberPage.jsx";
 import { clearMobileTxListSnapshot } from "./lib/mobileTxListSnapshot.js";
+import { useBundleFreshness } from "./hooks/useBundleFreshness.js";
 import TransactionLayout from "./pages/transaction/TransactionLayout.jsx";
 import TransactionPage from "./pages/transaction/TransactionPage.jsx";
 import TransactionHistoryPage from "./pages/transaction/TransactionHistoryPage.jsx";
@@ -37,6 +38,11 @@ function ClearTxListSnapshotOutsideTransaction() {
 }
 
 export default function App() {
+  // 回到前台时若线上已是新包就自动重载。
+  // 为何需要：安卓 WebView 从任务切换器切回来不会重新加载，
+  // 导致“改了代码设备上毫无变化”（实机显示 [b19] 而线上已是 [b22]）。
+  useBundleFreshness();
+
   return (
     <BiometricLockGate>
       <ClearTxListSnapshotOutsideTransaction />
