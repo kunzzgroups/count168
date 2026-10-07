@@ -148,6 +148,19 @@ cd .. && git worktree remove count168-com-merge --force && git branch -D com-mer
 > 或者 `git status --short c168_mobile/app` 逐条过一遍；
 > 出包后 `aapt2 dump badging <apk> | grep uses-permission` 对照预期权限（正常只有 `INTERNET`）。
 
+> **踩坑 7：手机版的 nginx 规则有两份，com 站生效的是 _内联_ 那份。** `deploy/nginx/c168-mobile-locations.inc`
+> 只在「机器上存在 certbot 的 le-ssl 文件」时才会被 patch 进去；count168.com 既无 LE 证书也无该文件，
+> 它的规则是 `deploy/nginx/count168.com.amazon-linux.conf` 里的**内联副本**（deploy 会整文件同步这份）。
+> 2026-10-10 改 `/c168_mobile/` 的 302 时先只改了 `.inc`，上线后毫无变化，第二次才找对文件。
+> 两边都要改，并在文件里互相注释提醒。另外 deploy 对已装 conf 会跑 `sed 's/ default_server//g'`，
+> 所以本地与线上 diff 总差那一处，属正常。
+
+> **踩坑 8：`/c168_mobile/`（带宽斜杠）曾是 403。** nginx 默认 location 会去服务目录本身，
+> 而 `/var/www/count168.com/c168_mobile/` 下没有 `index.html` → 403（`/c168_mobile/index.html` 也是 404）。
+> 客户把这个地址「添加到主屏」就会得到错误页。已加 `location = /c168_mobile/ { return 302 /c168_mobile/login; }`。
+> 给用户分享/指引一律用 **`https://www.count168.com/c168_mobile/login`**（或短链 `/c168_mobile`，会 302）。
+> 同时把 manifest 改为 `application/manifest+json`、`start_url` 改为 `/c168_mobile/login`（已登录时该页会自跳落地页）。
+
 ---
 
 ## 6. 电话版 APK（一个域名一份，别混用）
