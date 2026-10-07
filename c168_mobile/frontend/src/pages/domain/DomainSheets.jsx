@@ -523,14 +523,14 @@ function DomainAddAccountSheet({ open, onClose, companyCode, preferredRole, onSu
           <input
             className="m-tx-form-input m-tx-form-input--muted"
             value={form.account_id}
-            onChange={(e) => setForm((f) => ({ ...f, account_id: e.target.value.toUpperCase() }))}
+            onChange={(e) => setForm((f) => ({ ...f, account_id: e.target.value }))}
           />
         </Field>
         <Field label={t("name")}>
           <input
             className="m-tx-form-input m-tx-form-input--muted"
             value={form.name}
-            onChange={(e) => setForm((f) => ({ ...f, name: e.target.value.toUpperCase() }))}
+            onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
           />
         </Field>
         <Field label={t("role")}>
@@ -587,7 +587,7 @@ function DomainAddAccountSheet({ open, onClose, companyCode, preferredRole, onSu
             className="m-tx-form-input m-tx-form-input--muted"
             value={currencyInput}
             placeholder={t("newCurrencyPlaceholder")}
-            onChange={(e) => setCurrencyInput(e.target.value.toUpperCase())}
+            onChange={(e) => setCurrencyInput(e.target.value)}
           />
           <button
             type="button"
@@ -924,7 +924,7 @@ function DomainSettingsSheet({
               className="m-tx-form-input m-tx-form-input--muted"
               value={entityCodeInput}
               disabled={renameLocked}
-              onChange={(e) => setEntityCodeInput(e.target.value.toUpperCase())}
+              onChange={(e) => setEntityCodeInput(e.target.value)}
             />
           </Field>
           <div className="m-domain-section-title">{t("period")}</div>
@@ -1383,7 +1383,9 @@ export function DomainFormSheet({ open, onClose, domain, editingDomain, setConfi
 
     const data = {
       action: isEditMode ? "update" : "create",
-      owner_code: ownerCode,
+      // 输入框不再在每次按键时大写（会打断安卓输入法的组合输入 → 丢字/重复字），
+      // 所以在这里规范化；与 entityCodeInput/groupInput/companyInput 同一做法。
+      owner_code: ownerCode.trim().toUpperCase(),
       name,
       email: emailCheck.normalized,
       companies: JSON.stringify(
@@ -1448,7 +1450,7 @@ export function DomainFormSheet({ open, onClose, domain, editingDomain, setConfi
               className="m-tx-form-input m-tx-form-input--muted"
               value={ownerCode}
               disabled={isEditMode}
-              onChange={(e) => setOwnerCode(e.target.value.toUpperCase())}
+              onChange={(e) => setOwnerCode(e.target.value)}
             />
           </Field>
           <Field label={t("name")}>
@@ -1504,7 +1506,7 @@ export function DomainFormSheet({ open, onClose, domain, editingDomain, setConfi
                 className="m-tx-form-input m-tx-form-input--muted"
                 value={groupInput}
                 placeholder={t("groupIdPlaceholder")}
-                onChange={(e) => setGroupInput(e.target.value.toUpperCase())}
+                onChange={(e) => setGroupInput(e.target.value)}
               />
               <button
                 type="button"
@@ -1522,7 +1524,7 @@ export function DomainFormSheet({ open, onClose, domain, editingDomain, setConfi
                 className="m-tx-form-input m-tx-form-input--muted"
                 value={companyInput}
                 placeholder={t("companyIdPlaceholder")}
-                onChange={(e) => setCompanyInput(e.target.value.toUpperCase())}
+                onChange={(e) => setCompanyInput(e.target.value)}
               />
               <button
                 type="button"

@@ -161,12 +161,12 @@ function PartnerBlock({ disabled, onLink, t, descKey }) {
         <input
           type="text"
           autoComplete="off"
-          autoCapitalize="characters"
+          autoCapitalize="none"
           className="m-own-partner-input"
           placeholder={t("loginOrGroupId")}
           value={val}
           disabled={disabled || linking}
-          onChange={(e) => setVal(e.target.value.toUpperCase())}
+          onChange={(e) => setVal(e.target.value)}
         />
         <button
           type="button"
