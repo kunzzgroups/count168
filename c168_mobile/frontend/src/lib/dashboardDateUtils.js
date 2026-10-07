@@ -70,7 +70,8 @@ export function periodPresetRange(preset) {
 
 export function formatDisplayDate(ymd) {
   const d = parseYmd(ymd);
-  return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
+  /* Dashes, like the desktop and the phone's other date labels (desktop 96a06eaa1a). */
+  return `${String(d.getDate()).padStart(2, "0")}-${String(d.getMonth() + 1).padStart(2, "0")}-${d.getFullYear()}`;
 }
 
 export function formatChartDateRangeText(fromYmd, toYmd, toWord = "to") {

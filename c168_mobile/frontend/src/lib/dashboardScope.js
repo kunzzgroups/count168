@@ -86,6 +86,50 @@ function allGroupedCompaniesForPicker(companies, groupIds) {
   });
 }
 
+/** External partner company (desktop C991594338): `is_external` flag on the company row. */
+function companyRowIsExternalPartnerMapped(row) {
+  if (!row || isVirtualGroupLinkCompanyRow(row)) return false;
+  const v = row.is_external ?? row.isExternal;
+  return v === true || v === 1 || v === "1";
+}
+
+/**
+ * External partner companies remapped onto display group `gid` (`group_id` = partner group,
+ * `native_group_id` may still be their own group). Desktop `companiesExternalRemappedInGroupList`.
+ */
+function companiesExternalRemappedInGroupList(companies, gid) {
+  const g = normalizeGroupId(gid);
+  if (!g) return [];
+  return (companies || []).filter((c) => {
+    if (!c?.company_id || String(c.company_id).trim() === "") return false;
+    if (!companyRowIsExternalPartnerMapped(c)) return false;
+    if (normalizeGroupId(c.group_id) !== g) return false;
+    return normalizeGroupId(c.native_group_id ?? c.group_id) !== g;
+  });
+}
+
+/**
+ * Company pills for a group tab: native subsidiaries + partner-remapped companies
+ * (desktop C991594338 `companiesPickerInGroupList`). Without the second list a partner
+ * company never shows under the group it is displayed in, so its numbers are unreachable.
+ */
+function companiesPickerInGroupList(companies, gid) {
+  if (!gid) return companiesNativeInGroupList(companies, null);
+  const g = normalizeGroupId(gid);
+  const seen = new Set();
+  const merged = [];
+  for (const row of [
+    ...companiesNativeInGroupList(companies, g),
+    ...companiesExternalRemappedInGroupList(companies, g),
+  ]) {
+    const id = Number(row?.id);
+    if (!Number.isFinite(id) || id <= 0 || seen.has(id)) continue;
+    seen.add(id);
+    merged.push(row);
+  }
+  return merged;
+}
+
 export function sortedUniqueGroupIds(companies) {
   const set = new Set();
   for (const c of companies || []) {
@@ -103,8 +147,11 @@ export function resolveViewGroupForCompany(companyRow, fallbackGroup = null) {
     ? normalizeGroupId(companyRow.link_source_group)
     : "";
   if (link) return link;
-  const native = normalizeGroupId(companyRow.group_id);
-  if (native) return native;
+  // Display group first, like the desktop (921e555f25): a partner-remapped company
+  // (`group_id` = partner group, `native_group_id` = its own group) must be scoped to the
+  // group it is listed under, otherwise its pills/data come from another group's ledger.
+  const display = normalizeGroupId(companyRow.group_id);
+  if (display) return display;
   return fallbackGroup ? normalizeGroupId(fallbackGroup) : null;
 }
 
@@ -129,10 +176,8 @@ export function companiesForPicker(companies, { selectedGroup, groupsAllMode, pr
   let list;
   if (groupsAllMode) {
     list = allGroupedCompaniesForPicker(companies, groupIds);
-  } else if (selectedGroup) {
-    list = companiesNativeInGroupList(companies, selectedGroup);
   } else {
-    list = companiesNativeInGroupList(companies, null);
+    list = companiesPickerInGroupList(companies, selectedGroup || null);
   }
   list = excludeGroupLabelsFromCompanyPicker(list, groupIds);
   return dedupeOwnerCompaniesByCode(list, preferredCompanyId);

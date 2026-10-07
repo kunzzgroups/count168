@@ -6,10 +6,13 @@ import {
   splitHistoryDateChunks,
 } from "../lib/transactionHistoryProgressive.js";
 import { paymentHistoryParamsReady } from "../lib/transactionHistoryScope.js";
+import { useRealtimeDomain } from "../lib/realtime/useRealtimeDomain.js";
+import { REALTIME_DOMAINS } from "../lib/realtime/realtimeEvents.js";
 
 /**
- * Progressive Payment History (desktop parity, no realtime):
- * newest month first for fast paint, then older remainder.
+ * Progressive Payment History: newest month first (fast paint), then older remainder.
+ * Reloads on ledger realtime events (desktop c987735d1f), so a change made on another
+ * device or tab while this page is open is not left on screen stale.
  */
 export function useMobilePaymentHistoryProgressive({ scope, scopeApi, enabled }) {
   const [rows, setRows] = useState([]);
@@ -17,8 +20,17 @@ export function useMobilePaymentHistoryProgressive({ scope, scopeApi, enabled })
   const [isInitialLoading, setIsInitialLoading] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [errorMessage, setErrorMessage] = useState(null);
+  const [ledgerReloadToken, setLedgerReloadToken] = useState(0);
 
   const historyParamsReady = enabled && paymentHistoryParamsReady(scope);
+
+  useRealtimeDomain(
+    REALTIME_DOMAINS.LEDGER,
+    () => {
+      setLedgerReloadToken((n) => n + 1);
+    },
+    { enabled: historyParamsReady },
+  );
 
   useEffect(() => {
     if (!historyParamsReady) {
@@ -112,6 +124,7 @@ export function useMobilePaymentHistoryProgressive({ scope, scopeApi, enabled })
     };
   }, [
     historyParamsReady,
+    ledgerReloadToken,
     scope.accountDbId,
     scope.currency,
     scope.dateFrom,

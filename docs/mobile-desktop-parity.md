@@ -230,11 +230,35 @@ PY
 - `ba8d61e3ec` / `88c83b283d`（Rate-Mul 负数规则）：该规则后来又被 `0dbecde1ca` 改过；用 `diff` 比对 `transactionSubmitHelpers.js` 两边**除 import 行外逐字节相同** → 已对齐。
 - `29dc57b5bb`（payment history 按 DMY 分月）：`lib/transactionHistoryProgressive.js` 两边 diff 为空 → 已对齐。
 - `d235813173`（aктивe/inactive 状态过滤）：改动主体在后端 `api/accounts/accountlistapi.php`（两端共用）；电话版账号页只有一个 Show Inactive 开关，其请求与新后端语义一致 → 无需同步（电话版没有「Active + Inactive 并列」的开关）。
-- `156f3e80cf` / `ab5b7684b8` 等：改动在后端 / 部署配置，两端共用，天然对齐。
+- `156f3e80cf` / `ab5b7684b8`：**已纠正**——这两条不只改后端，也改了 `frontend/src`（`useTransactionSync.js` / `useTransactionUI.js` / `transactionApi.js` / `transactionRealtime.js`）。核验结论是「电话版有等价实现」（`hooks/useMobileTransaction.js` 的 LEDGER 订阅→同一 effect 里刷 Contra 徽标；`lib/realtime/subscribeAppRealtime.js`），依据是代码等价而非「无前端改动」。
+- `c39a7325e3` / `09a48aa641` / `9e82ad01bc`（realtime 相关）：桌面后续自己 revert 了，电话版当前状态与 revert 后的桌面一致 → 无净效果。
+- `f244125115`（回退付款历史为单请求）：该回退还被同日后继提交 `5422133f34` 推翻；电话版 `lib/transactionHistoryProgressive.js` 与桌面**当前**版本 diff 为空 → 已对齐。
+- `f333718d7b` / `e22180b85a`（Rate-Mul）：同上 `transactionSubmitHelpers.js` 逐字节相同（且这两条规则已被 `0dbecde1ca` 取代）→ 已对齐。
 
-### 未逐条核的部分（诚实声明）
+### 2026-07~08 窗口剩余 60 条：逐条核查结果（2026-10 完成）
 
-69 条里剩下的 ~38 条尚未逐条核实（大部分看名字仍是 dashboard 面板绘制/动画/实时总线内部实现，已被归为不适用，但没有逐条验证）。如需继续，按同样流程分批（每批 ~30 条）推进。
+方法：把 69 条候选里扣掉已处理的 9 条（本页各批）后剩下的 **60 条**按域拆成 4 份，派 4 个只读核查（dashboard 24 / realtime 11 / account+domain+member 12 / transaction+登录页+整仓同步 13），要求每条给出「已对齐 / 不适用 / 疑似缺口」+ file:line 证据；**子代理只当线索**，它报的每一条缺口我自己再到两端代码核一遍才动手。
+
+结果：**56 条为已对齐或不适用（无净效果 / 电话版无此页 / 纯视觉 / 纯性能 / 后端共用），4 条真缺口已修**（见下表）。至此 69 条候选全部有结论，无需再重审。
+
+| 桌面提交 | 真缺口 | 电话版改动 |
+|---|---|---|
+| `c991594338` + `921e555f25` | partner 被重映射到展示组的公司，在电话版公司条里**列不出来**（`group_id`=合作组、`native_group_id`=自己组；picker 只按 native 过滤）→ 这家公司的数字完全进不去 | `lib/dashboardScope.js`：新增 `companyRowIsExternalPartnerMapped()` / `companiesExternalRemappedInGroupList()` / `companiesPickerInGroupList()`（镜像桌面同名三函数，原生 + 重映射按 id 去重），`companiesForPicker` 改用它；`resolveViewGroupForCompany` 改为**展示组优先**（原为 `native_group_id ?? group_id`，与桌面 `normalizeCompanyGroupId` 相反） |
+| `bf6c5eaf0e`（夹带项） | 电话版 `RATE_STORE_MAX_DECIMALS = 8`，而桌面=6、后端硬限也是 6（`submit_api.php` `SUBMIT_STORE_SCALE_RATE`）→ 用户填 7–8 位小数时电话版本地放行，提交后被服务端原文报错 | `lib/transactionFormat.js`：常量为 6（`RATE_MAX_DECIMALS = 8` 不动，表达式 token 仍可 8 位） |
+| `c987735d1f` | 付款历史页停在页面上时，其他端/别的 tab 产生的台账变动不会刷新（桌面靠 LEDGER 实时事件重拉） | `hooks/useMobilePaymentHistoryProgressive.js`：新增 `ledgerReloadToken` + `useRealtimeDomain(LEDGER)` 并加入主 effect 依赖（与桌面 `usePaymentHistoryProgressive.js` 同形） |
+| `96a06eaa1a`（日期显示部分） | 电话版 dashboard/账号/域名 sheet 的日期是 `30/09/2026`，桌面与电话版其它页均是 `30-09-2026` | `lib/dashboardDateUtils.js` 的 `formatDisplayDate` 改短横（纯展示，无解析链路） |
+
+验证（dev harness，真模块 + fetch/实时总线 stub）：KK 组能看到重映射的 IT 公司、JJ 组仍按 native 列出 IT（与桌面一致）、无组列表不变、重映射公司 `view group = KK`、`link_source_group` 仍优先、无组仍回退 fallback、独立公司判定不受 `is_external` 影响；常量 = 6；日期 = `30-09-2026`；历史页：初始 1 次请求 → **ACCOUNTS 事件 0 次新增**（反证）→ **LEDGER 事件 +1 次**。
+
+### 仍然未定的项（已记录，等真实账号/产品决定）
+
+| 项 | 内容 | 为何不定 |
+|---|---|---|
+| `a8cfe5e12b` | Groups All + Company All 的合并清单未按「组台账权限」过滤（纯 Groups All 路径已过滤） | 只有「按公司指派且其所在组不在 `assigned_group_codes`」的 member 才可能多合并；代码上无法断言这种登录形态存在 |
+| partner-remap 真机数字 | `resolveViewGroupForCompany` 改成展示组后，重映射公司的 `view_group` 变了（JJ→KK） | 需要真实 partner 重映射租户才能看到数字差异；无该账号则只能代码级验证（两端逻辑已一致） |
+| `d235813173`（Show Active 并列视图） | 桌面能同时展示 active+inactive，电话版只有 Show Inactive | 属产品能力选择（默认集与桌面一致，不是错数据）| 
+| `44001fd738`（仅首次提交才跳日期） | 电话版每次提交都把 capture 范围锚到 `[txDate, today]` | 只在「提交后手改左栏日期且不 Exit 再提交」这种组合下有别；且有显式 Exit 还原快照，判定为有意简化 |
+| `b760877d99` / auto-renew | 域名批量删除失败原因只报数量；auto-renew 审批后无直接 invalidate（靠后端 SSE） | 诊断/体验级，非错误数据 |
 
 ---
 

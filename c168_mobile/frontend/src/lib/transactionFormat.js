@@ -95,7 +95,10 @@ const RATE_HISTORY_MAX_DECIMALS = 6;
 /** Non-RATE manual submit store scale (display still round-2). */
 export const TX_STORE_MAX_DECIMALS = 6;
 /** RATE amount store scale (display still round-2). */
-export const RATE_STORE_MAX_DECIMALS = 8;
+/** Stored scale for rate amounts — desktop parity, and the backend rejects more than this
+ *  (`api/transactions/submit_api.php` SUBMIT_STORE_SCALE_RATE = 6). Expression tokens may
+ *  still be 8dp wide (RATE_MAX_DECIMALS); only the submitted amount is capped at 6. */
+export const RATE_STORE_MAX_DECIMALS = 6;
 
 /** Same as legacy `js/transaction.js` countDecimalPlaces (RATE token width checks). */
 export function countRateDecimalPlaces(value) {
