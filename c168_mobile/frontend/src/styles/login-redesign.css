@@ -44,6 +44,14 @@ html:has(body.bg) {
   background: #dbe9fb url("/images/count_bg.webp") center / cover no-repeat;
 }
 
+/* 手机 / 窄屏 / 竖屏：换成竖版背景（941×1672，图形分布在左右两侧、中间留白）。
+   横版图（2560×1440）在竖屏被 cover 裁到只剩中间那块空白，看着发虚。 */
+@media (max-width: 900px) {
+  html:has(body.bg) {
+    background-image: url("/images/count_bg_mobile.webp");
+  }
+}
+
 body.bg {
   background: none;
 }
