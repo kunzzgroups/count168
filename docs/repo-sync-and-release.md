@@ -168,6 +168,17 @@ cd .. && git worktree remove count168-com-merge --force && git branch -D com-mer
 > `/c168_mobile/login`，**已存在的错误图标不用删重加就能修好**。
 > 以后再写任何引导文案，一律要求「在应用内添加」，并别把「添加到主屏幕」写成引导用户在当前页做的事。
 
+> **踩坑 10：passkey 重复注册会自我循环。** 2026-10-10 客户报「点退出→弹窗→刷完又被弹一次 Add Passkey」。
+> 后端本来就传了 `excludeCredentials`，所以系统会以 `InvalidStateError` 拒绝重复注册；
+> 但客户端把这个错误当失败 → 开关弹回 Off → 用户再点一次 → 又弹一次 ✗ 循环。
+> 已修（`lib/webauthn.js` / `pages/more/SettingsPage.jsx` / `pages/login/LoginPage.jsx`）：
+> ① 本机已有（本地标记 + 服务端列表）就不注册；② `InvalidStateError` 按「已开启」收敛；
+> ③ 退出登录写一次性标记，登录页那次不自动弹刷脸（否则看着像退不掉）。
+> 库里当时堆了 39 行（同一账号 35 行，多条相隔 4–21 秒）——判据：**每行都要过我们自己的
+> `webauthn_register_verify_api.php` 才会落库**，所以这能证明是客户端重复发起，而不是系统自己弹的。
+> 清理方式：先备份再删已吐销行（`SELECT ... WHERE revoked_at IS NOT NULL` → CSV 到 `/home/ec2-user/`，
+> 再 `DELETE` 同一条件），**有效凭据一律不碰**。清理后 39→3 行（每用户 1 条有效）。
+
 ---
 
 ## 6. 电话版 APK（一个域名一份，别混用）
