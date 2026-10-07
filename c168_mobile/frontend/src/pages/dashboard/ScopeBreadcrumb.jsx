@@ -56,6 +56,16 @@ export default function ScopeBreadcrumb({
     );
   }
 
+  /* Company "All" with no group (independents merge) — nothing to show on the left. */
+  if (groupAllMode) {
+    return (
+      <span className="m-scope m-scope--gap-md">
+        <ScopeGlyph tone="blue" icon="fa-building" />
+        <span className="m-scope-text m-scope-text--blue">{i18n.all}</span>
+      </span>
+    );
+  }
+
   if (c) {
     return (
       <span className="m-scope m-scope--gap-md">

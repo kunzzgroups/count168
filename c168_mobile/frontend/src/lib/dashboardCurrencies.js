@@ -3,6 +3,7 @@ import { fetchJson } from "./fetchJson.js";
 import { orderCurrencyCodesForCompany } from "./currencyOrder.js";
 import {
   companiesForPicker,
+  independentCompaniesForPicker,
   normalizeGroupId,
   resolveViewGroupForCompany,
 } from "./dashboardScope.js";
@@ -55,6 +56,29 @@ async function fetchCompanyCurrencySettingCodes(companyId, viewGroup = "", signa
   return [];
 }
 
+/**
+ * Account-linked currencies for one company — desktop 19349a3611: independent companies
+ * take the same source as picking that company alone, not bare Currency Setting rows
+ * (those can carry codes no account on this company ever uses).
+ */
+async function fetchCompanyAccountCurrencyCodes(companyId, signal) {
+  const cid = Number(companyId);
+  if (!Number.isFinite(cid) || cid <= 0) return [];
+  try {
+    const q = new URLSearchParams({ company_id: String(cid) });
+    const { res, json } = await fetchJson(
+      buildApiUrl(`api/transactions/get_scope_account_currencies_api.php?${q}`),
+      { signal },
+    );
+    if (res.ok && json?.success && Array.isArray(json.data)) {
+      return normalizeCodes(json.data);
+    }
+  } catch (e) {
+    if (e?.name === "AbortError") throw e;
+  }
+  return [];
+}
+
 async function mapPool(items, limit, mapper) {
   const results = new Array(items.length);
   let cursor = 0;
@@ -70,9 +94,15 @@ async function mapPool(items, limit, mapper) {
   return results;
 }
 
-function resolveOrderCompanyId(companyId, companies, selectedGroup, groupsAllMode) {
+function resolveOrderCompanyId(companyId, companies, selectedGroup, groupsAllMode, groupAllMode) {
   const cid = Number(companyId);
   if (Number.isFinite(cid) && cid > 0) return cid;
+  // Independent Company All merges independents only — anchor the order on the same set.
+  if (groupAllMode && !groupsAllMode && !normalizeGroupId(selectedGroup)) {
+    const independent = independentCompaniesForPicker(companies);
+    const firstIndependent = Number(independent?.[0]?.id);
+    if (Number.isFinite(firstIndependent) && firstIndependent > 0) return firstIndependent;
+  }
   const rows = companiesForPicker(companies, { selectedGroup, groupsAllMode });
   const first = Number(rows?.[0]?.id);
   return Number.isFinite(first) && first > 0 ? first : null;
@@ -96,7 +126,13 @@ export async function fetchMobileCurrencyCodes({
   const hasCompany = Number.isFinite(Number(companyId)) && Number(companyId) > 0;
   const groupOnly = Boolean(group && !groupAllMode && !groupsAllMode && !hasCompany);
   let codes = [];
-  let orderCompanyId = resolveOrderCompanyId(companyId, companies, selectedGroup, groupsAllMode);
+  let orderCompanyId = resolveOrderCompanyId(
+    companyId,
+    companies,
+    selectedGroup,
+    groupsAllMode,
+    groupAllMode,
+  );
 
   if (groupOnly) {
     // Prefer company Currency Setting union for the group (stable, no 403 spam).
@@ -140,7 +176,13 @@ export async function fetchMobileCurrencyCodes({
       }
     }
   } else if (groupsAllMode || groupAllMode) {
-    const rows = companiesForPicker(companies, { selectedGroup, groupsAllMode });
+    // Desktop 19349a3611: Company "All" without a group merges independents, whose codes
+    // come from their accounts — Currency Setting leftovers would add a phantom pill.
+    const independentAll = !groupsAllMode && !group;
+    // Same set the dashboard merges in that mode, so pills describe what is on screen.
+    const rows = independentAll
+      ? independentCompaniesForPicker(companies)
+      : companiesForPicker(companies, { selectedGroup, groupsAllMode });
     const ids = rows
       .map((c) => Number(c.id))
       .filter((id) => Number.isFinite(id) && id > 0)
@@ -153,11 +195,16 @@ export async function fetchMobileCurrencyCodes({
       if (signal?.aborted) return [];
       const row = (companies || []).find((c) => Number(c.id) === id);
       const vg = groupsAllMode ? resolveViewGroupForCompany(row, selectedGroup) : group;
-      return fetchCompanyCurrencySettingCodes(id, vg, signal);
+      return independentAll
+        ? fetchCompanyAccountCurrencyCodes(id, signal)
+        : fetchCompanyCurrencySettingCodes(id, vg, signal);
     });
     codes = [...new Set(parts.flat())];
   } else {
-    codes = await fetchCompanyCurrencySettingCodes(companyId, group, signal);
+    // Desktop 19349a3611: no view group = independent company → account-linked codes only.
+    codes = group
+      ? await fetchCompanyCurrencySettingCodes(companyId, group, signal)
+      : await fetchCompanyAccountCurrencyCodes(companyId, signal);
     orderCompanyId = Number(companyId);
   }
 

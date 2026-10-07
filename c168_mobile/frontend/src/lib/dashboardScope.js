@@ -147,6 +147,18 @@ function isIndependentCompanyRow(row, groupIds) {
   return !native;
 }
 
+/**
+ * Independent (ungrouped) companies — desktop 276125d07f `resolveIndependentAllMergeCompanyList`.
+ * Used when Company "All" is picked with no Group selected: the merge then covers exactly the
+ * companies that have no group, not every company the picker can show.
+ */
+export function independentCompaniesForPicker(companies) {
+  const groupIds = sortedUniqueGroupIds(companies);
+  return dedupeOwnerCompaniesByCode(
+    (companies || []).filter((row) => isIndependentCompanyRow(row, groupIds)),
+  );
+}
+
 /** Desktop-aligned first-login Group / Company scope for mobile filters. */
 export function resolveInitialMobileGcScope(me, companies, sessionRow) {
   const groupIds = sortedUniqueGroupIds(companies);

@@ -11,7 +11,7 @@ import {
   todayYmd,
 } from "../../lib/dashboardDateUtils.js";
 import { fetchMobileCurrencyCodes } from "../../lib/dashboardCurrencies.js";
-import { companiesForPicker as resolveCompaniesForPicker, pickCompany, resolveCompanyPickForGroup } from "../../lib/dashboardScope.js";
+import { companiesForPicker as resolveCompaniesForPicker, independentCompaniesForPicker, pickCompany, resolveCompanyPickForGroup } from "../../lib/dashboardScope.js";
 import {
   companyLoginCanUseGroupsAllLedger,
   isCompanyLogin,
@@ -634,7 +634,13 @@ export default function FilterSheet({ open, onClose, dash }) {
               {(companiesForPicker.length > 1 || draft.selectedGroup || draft.groupsAllMode) && (
                 <Pill
                   active={draft.groupAllMode}
-                  disabled={!draft.selectedGroup && !draft.groupsAllMode}
+                  disabled={
+                    !draft.selectedGroup &&
+                    !draft.groupsAllMode &&
+                    /* No Group picked: All merges the independent companies, so it needs some.
+                       (This picker also lists grouped companies, which that All must not touch.) */
+                    !independentCompaniesForPicker(dash.companies).length
+                  }
                   onClick={() =>
                     setDraft((prev) => {
                       // Desktop: Company All under Groups All keeps both flags.

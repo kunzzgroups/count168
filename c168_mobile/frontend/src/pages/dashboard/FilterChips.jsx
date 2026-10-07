@@ -9,6 +9,7 @@ import {
 import { fetchMobileCurrencyCodes } from "../../lib/dashboardCurrencies.js";
 import {
   companiesForPicker as resolveCompaniesForPicker,
+  independentCompaniesForPicker,
   resolveCompanyPickForGroup,
 } from "../../lib/dashboardScope.js";
 import { dashboardLabel } from "../../translateFile/dashboardTranslate.js";
@@ -266,7 +267,7 @@ function scopeShortLabel(dash, draft) {
   const row = dash.companies?.find((c) => Number(c.id) === Number(draft.companyId));
   const code = String(row?.company_id || "").toUpperCase();
   if (draft.groupsAllMode) return `${i18nAll(dash)} › ${code || i18nAll(dash)}`;
-  if (draft.groupAllMode) return `${group} › ${i18nAll(dash)}`;
+  if (draft.groupAllMode) return group ? `${group} › ${i18nAll(dash)}` : i18nAll(dash);
   if (group && !code) return group;
   return `${group || i18nAll(dash)} › ${code || i18nAll(dash)}`;
 }
@@ -476,7 +477,13 @@ export function ScopeFilterChip({ dash, i18n, groupId, companyCode, groupOnlyMod
             {(companiesForPicker.length > 1 || draft.selectedGroup || draft.groupsAllMode) && (
               <Pill
                 active={draft.groupAllMode}
-                disabled={!draft.selectedGroup && !draft.groupsAllMode}
+                disabled={
+                  !draft.selectedGroup &&
+                  !draft.groupsAllMode &&
+                  /* No Group picked: All merges the independent companies, so it needs some.
+                     (This picker also lists grouped companies, which that All must not touch.) */
+                  !independentCompaniesForPicker(dash.companies).length
+                }
                 onClick={() =>
                   setDraft((prev) => {
                     if (prev.groupsAllMode) {

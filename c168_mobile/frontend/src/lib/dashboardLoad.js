@@ -7,6 +7,7 @@ import {
 } from "./dashboardMerge.js";
 import {
   companiesInGroup,
+  independentCompaniesForPicker,
   normalizeGroupId,
   pickCompany,
   resolveViewGroupForCompany,
@@ -570,7 +571,10 @@ export async function loadMobileDashboardData(scopeState, { signal, loadError } 
 
   const list = groupsAllMode
     ? resolveGroupsAllCompanyList(companies)
-    : resolveGroupAllCompanyList(companies, selectedGroup);
+    : selectedGroup
+      ? resolveGroupAllCompanyList(companies, selectedGroup)
+      : /* Desktop 276125d07f: no Group selected → Company "All" merges the independent companies. */
+        independentCompaniesForPicker(companies);
 
   if (!list.length) throw new Error(loadError || "Failed to load dashboard");
 

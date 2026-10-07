@@ -174,12 +174,33 @@ PY
 | `6f1c39f5e7` | 提交后汇率被清空 | `AddTransactionSheet.jsx` 的 `resetForm` 不再清 `rateExchangeRateRaw`（sheet 由 `open` 控制、组件不卸载，状态会保留） |
 | `b59f77174f` | contra 拒结用 `window.confirm` | `ContraInboxSheet.jsx` 改为应用内确认面板（复用现有类，不加 CSS）：点 Reject → 面板出来、列表收起 → 确认才 `onReject(id)`；两个 hook 都放在 `if (!open) return null` **之前**，避免 hooks 顺序错误；关闭 sheet 时清掉待确认状态 |
 
-### 已核实但尚未修（3）——下一批
+### 已核实但尚未修（1）——下一批
 
 | 桌面提交 | 内容 | 为什么缓一步 |
 |---|---|---|
-| `19349a3611` | 独立公司（不属于任何 group）的币种来源应用 scope-account 接口 | **与 `276125d07f` 连体**：电话版在无 group 时 Company All 被禁用，所以这条的生效路径根本进不去；两条要一起改。会改数据口径（`get_company_currencies_api` → `get_scope_account_currencies_api`），且 dashboard 是电话版最重的页，单独分批做 |
-| `276125d07f` | 独立公司无 group 时 Company All 被禁用 | 同上。早退点在 `useMobileDashboard.js` 的 `if (!selectedGroup) return;`，禁用条件在 `FilterSheet.jsx` 的 Pill |
+| `5b0455a06e` | group tenant：currency order 缺 group 维度 + 空 group 启动早退 | 涉及 `transactionApi.js` 加 `group_id` 参数与缓存键改 `g:<id>`，影响面较大 |
+
+> 原先与它同列、缓一步的 `19349a3611` / `276125d07f` 已于本轮修完（见下表）。
+
+### 第二轮：dashboard 独立公司（本轮，两条连体）
+
+| 桌面提交 | 内容 | 电话版改动 |
+|---|---|---|
+| `276125d07f` | 独立公司（不属任何 group）无 group 时 Company All 不可用 | `lib/dashboardScope.js` 新增 `independentCompaniesForPicker()`（镜像桌面 `resolveIndependentAllMergeCompanyList`：未分组、非组实体、非链接行，按 code 去重）；`lib/dashboardLoad.js` 合并范围由 `: resolveGroupAllCompanyList(companies, null)`（= 空集）改为 `: independentCompaniesForPicker(companies)`；`FilterSheet.jsx` + `FilterChips.jsx` 的 Company All pill 放开禁用（改为按有无独立公司判断） |
+| `19349a3611` | 独立公司币种来源应对齐「单独选这家公司」的接口 | `lib/dashboardCurrencies.js` 新增 `fetchCompanyAccountCurrencyCodes()`（`get_scope_account_currencies_api?company_id=`），两处换用它：① 独立公司单公司范围 ② 独立公司 All（逐公司 account 码并集）；并且**币种集合与合并集合同源**（否则组内公司的币种会混进独立 All）；排序锚点同步改为独立集合首家 |
+| `276125d07f` 附带 | 面包屑没有「无组 All」的样子 | `pages/dashboard/ScopeBreadcrumb.jsx` 加 `groupAllMode` 无 group 分支 → 只显示 "All"（原先会落到底部的 "Filter"）；`FilterChips.jsx` 的 `scopeShortLabel` 同修（不再拼出空组前缀 ` › All`） |
+
+两处电话版有意偏离（理由留底）：
+
+- **没拄桌面的「空列表也 commit」**（桌面用它清掉 Currency Setting 暖缓存留下的幻影 MYR pill）。电话版没有那种暖缓存（`dashboardCurrencies.js` 无 cacheRef），全局规则是空集合回退 `["MYR"]`（KPI/图表同步走 MYR），改成空列表反而多一个无 pill 的状态。
+- **pill 多一道守卫**：电话版无 group 时 `companiesForPicker` 列的是**全部**公司（桌面只列独立公司），所以「有 ≥2 家公司」不等于「独立 All 有内容」，若一个独立公司都没有则合并集合为空 → 加载报错。因此无 group 分支额外要求 `independentCompaniesForPicker(dash.companies).length > 0`。
+
+验证（dev harness，真模块 + stub fetch 记录请求）：
+
+- 合并范围：Company All 无 group → 只查 2 家独立公司（组内公司不进来，`capital` = 两家之和）；组内 All 仍只查该组；单公司（独立/组内）分支各自不变。
+- 币种：独立 All → 只调 account 接口（无 Currency Setting 请求、无 `JPY` 残留）；独立单公司 → account 接口；组内单公司 → 仍带 `subsidiary_accounts_only=1&view_group=AP`；组内 All → 仍走 Currency Setting。
+- UI：有独立公司时 All pill 可点且点后 draft 变 `groupAllMode:true / companyId:null`；只有组内公司时仍禁用；面包屑无 group 显示 "All"。
+- 未验证：真机/真库上的数字（合并后的 KPI）——需要独立公司账号登录才能看到，未做。
 | `5b0455a06e` | group tenant：currency order 缺 group 维度 + 空 group 启动早退 | 涉及 `transactionApi.js` 加 `group_id` 参数与缓存键改 `g:<id>`，影响面较大 |
 
 ### 已核实为「不适用 / 已对齐」的典型例子
