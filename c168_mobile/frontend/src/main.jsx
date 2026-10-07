@@ -14,6 +14,7 @@ import "./styles/filter-sheet.css";
 import "./styles/login.css";
 import "./styles/password-field.css";
 import "./index.css";
+import "./styles/login-redesign.css";
 
 applyLoginTheme(readLoginTheme());
 

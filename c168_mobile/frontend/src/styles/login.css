@@ -1,5 +1,7 @@
 body.bg {
   color-scheme: light;
+  /* border-box：否则 min-height:100dvh 会算上上下 padding，页面永远多出 32px 可滚动 */
+  box-sizing: border-box;
   font-family:
     "Segoe UI",
     "Microsoft YaHei UI",
@@ -24,6 +26,8 @@ body.bg {
 }
 
 /* #root fills the flex host so the login column can use full mobile width */
+/* #root 不再重复 min-height:100dvh：它在带上下内边距的 body 里会把页面再撑高一层
+   （内容仍然由 body 的 flex 居中；内容真的超出一屏时照样能滚） */
 body.bg #root {
   min-width: 0;
   width: 100%;
@@ -33,7 +37,6 @@ body.bg #root {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 100dvh;
 }
 
 html:has(body.bg) {

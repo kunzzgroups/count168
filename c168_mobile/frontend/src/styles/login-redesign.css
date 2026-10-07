@@ -1,0 +1,411 @@
+
+/* ============================================================================
+   登录页视觉重构 —— 按 Jasonlol63/NewFrontend 的设计稿（docs/login-page-design.md）
+   （2026-10-07 移植到手机版；只换视觉，不动任何登录逻辑 / i18n / 生物识别）
+
+   设计稿确认过的点，别改回去：
+     1. logo 用现有图片旋转 -45°，不是重新设计的图形
+     2. 卡片宽度上限 400px
+     3. 输入框圆角 13px（偏方带圆角），不是满圆胶囊
+     4. 登录按钮与语言开关保持满圆胶囊
+     5. Tab 未选中态是实心暗色块 #dbe7f7，不是白/透明
+     6. 背景用 count_bg.png cover，不放大 background-size
+
+   与桌面稿的两处**有意偏离**（手机端原因）：
+     · 输入框字号 16px（设计稿 12.5px）—— 低于 16px 时 iOS 聚焦输入框会整页放大
+     · 输入框高度 38px 照设计稿，但触控最小高度交给 padding 撑住
+   ========================================================================== */
+
+/* 卡片宽度：设计稿是 400px（列宽 = 400 + 两侧 4px） */
+:root {
+  --login-shell-max-width: 408px;
+}
+
+/* 登录页原本会多出 32px 可滚动高度：body 有上下 padding + min-height:100dvh，
+   而 index.css 里 `body.bg #root { min-height: 100dvh }` 又叠一层（box-sizing 是 content-box）。
+   把上下留白从 body 挪到列上，100dvh 就变得精确：内容装得下 → 不滚；装不下（横屏/超小屏）→ 照旧能滚。 */
+body.bg {
+  padding-block: 0;
+}
+
+body.bg .sc-login-column {
+  padding-block: calc(max(16px, env(safe-area-inset-top)) + var(--m-inset-t, 0px)) max(16px, var(--m-safe-b));
+}
+
+/* 背景：设计稿那套新背景图（中间刻意留白给内容，两侧是图形 + 电路线）
+   用新文件名 count_bg.webp，桌面版仍在用的 count_bg.png 不动。
+
+   挂在 html 而不是 body：body 的盒子不含滚动条预留的 gutter（login.css 为了让键盘弹出时
+   不抖动保留了 scrollbar-gutter: stable），挂在 body 上时右侧会露出一条 15px 的浅色竖带。 */
+html:has(body.bg) {
+  /* 不预留滚动条 gutter：预留的那 15px 背景图铺不进去，右侧会露一条纯 #dbe9fb 竖带
+     （原来写它是为了键盘弹出出现滚动条时不左右跳；手机端都是悬浮滚动条，本来就无感） */
+  scrollbar-gutter: auto;
+  background: #dbe9fb url("/images/count_bg.webp") center / cover no-repeat;
+}
+
+body.bg {
+  background: none;
+}
+
+/* 头部：logo（旋转 -45°）+ 标题 + 标语 */
+.sc-login-brand {
+  text-align: center;
+  margin: 0 0 clamp(8px, 1.6dvh, 14px);
+}
+
+.sc-login-brand-logo {
+  width: clamp(48px, calc(12dvh - 24px), 76px);
+  height: clamp(48px, calc(12dvh - 24px), 76px);
+  margin: 0 auto clamp(8px, 1.6dvh, 14px);
+  transform: rotate(-45deg);
+  filter: drop-shadow(0 10px 14px rgba(20, 90, 200, 0.35));
+}
+
+.sc-login-brand-logo img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.sc-login-title {
+  margin: 0 0 4px;
+  font-size: clamp(18px, 3dvh, 21px);
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  color: #14336b;
+}
+
+.sc-login-tagline {
+  margin: 0 0 clamp(14px, 2.8dvh, 24px);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 3px;
+  color: #7fa8d6;
+}
+
+/* 卡片 */
+.sc-login-card {
+  background: linear-gradient(180deg, #ffffff 0%, #f5f9ff 100%);
+  border-radius: 24px !important;
+  backdrop-filter: none;
+  box-shadow:
+    0 30px 60px -20px rgba(20, 70, 160, 0.35),
+    0 10px 25px -10px rgba(20, 70, 160, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+/* Tab：未选中=实心暗块，选中=品牌渐变 */
+.sc-login-role-tabs {
+  background: #dbe7f7;
+  border-radius: 24px 24px 0 0 !important;
+}
+
+.sc-login-role-tab {
+  min-height: 0;
+  padding: clamp(10px, 1.8dvh, 14px) 0;
+  background: transparent;
+  color: #6f93c9;
+  font-size: 14px;
+  font-weight: 700;
+  transition: color 0.25s ease, transform 0.25s ease;
+}
+
+.sc-login-role-tab.active {
+  background: linear-gradient(100deg, #0a3fc9 0%, #2f8dff 55%, #3fc4ff 100%);
+  color: #ffffff;
+  box-shadow: inset 0 -3px 10px rgba(255, 255, 255, 0.25), 0 6px 14px -2px rgba(20, 90, 220, 0.55);
+}
+
+.sc-login-role-tab:active {
+  transform: scale(0.99);
+}
+
+.sc-login-card-content {
+  padding: 14px 16px;
+  color: #14336b;
+}
+
+.sc-login-form {
+  gap: clamp(8px, 1.5dvh, 12px);
+}
+
+/* 输入框：38px / 圆角 13px / 1px #d9e8fb / 白→#f7fbff 渐变 */
+body.bg .sc-login-input {
+  min-height: 38px;
+  height: 38px;
+  padding: 0 14px 0 38px;
+  border-width: 1px;
+  border-color: #d9e8fb;
+  border-radius: 13px;
+  background: linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
+  box-shadow: inset 0 1px 2px rgba(20, 70, 160, 0.06);
+  color: #4a6fa5;
+  font-size: 16px; /* iOS：低于 16px 聚焦会放大整页（设计稿桌面值是 12.5px） */
+  caret-color: #2f6fef;
+}
+
+body.bg .sc-login-input::placeholder {
+  color: #a9c3e6;
+  font-weight: 400;
+  letter-spacing: normal;
+}
+
+body.bg .sc-login-input:focus {
+  border-color: #4f8ef0;
+  box-shadow: 0 0 0 3px rgba(79, 142, 240, 0.12);
+}
+
+.sc-login-input-icon {
+  left: 14px;
+  color: #6fa8ea;
+  font-size: 15px;
+}
+
+/* Remember me 开关 32x18（滑块 14px）+ Forget Password */
+.sc-login-remember-slider {
+  width: 32px;
+  height: 18px;
+}
+
+.sc-login-remember-slider::after {
+  width: 14px;
+  height: 14px;
+}
+
+.sc-login-remember-check:checked + .sc-login-remember-slider {
+  background: linear-gradient(100deg, #0a3fc9 0%, #3fc4ff 100%);
+}
+
+.sc-login-remember-check:checked + .sc-login-remember-slider::after {
+  transform: translateX(14px);
+}
+
+.sc-login-remember-check {
+  width: 32px;
+  height: 18px;
+}
+
+.sc-login-remember-text {
+  color: #4a5568;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.sc-login-forgot-link {
+  color: #2f6fef;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.sc-login-forgot-link:hover {
+  color: #0a3fc9;
+}
+
+/* 登录按钮：满圆胶囊 + 品牌渐变 + 内高光 */
+.sc-login-submit-btn {
+  height: clamp(38px, 5.5dvh, 42px);
+  min-height: clamp(38px, 5.5dvh, 42px);
+  max-height: none;
+  margin-top: 4px;
+  padding: 0 18px;
+  border-radius: 999px;
+  background: linear-gradient(100deg, #0a3fc9 0%, #2f8dff 55%, #3fc4ff 100%);
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 700;
+  gap: 8px;
+  box-shadow:
+    0 14px 24px -8px rgba(20, 90, 220, 0.55),
+    inset 0 -3px 8px rgba(0, 0, 0, 0.08),
+    inset 0 2px 4px rgba(255, 255, 255, 0.35);
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+.sc-login-submit-btn:hover {
+  background: linear-gradient(100deg, #0a3fc9 0%, #2f8dff 55%, #3fc4ff 100%);
+  transform: none;
+  box-shadow:
+    0 14px 24px -8px rgba(20, 90, 220, 0.55),
+    inset 0 -3px 8px rgba(0, 0, 0, 0.08),
+    inset 0 2px 4px rgba(255, 255, 255, 0.35);
+}
+
+.sc-login-submit-btn:active {
+  transform: scale(0.99);
+}
+
+.sc-login-submit-btn:disabled {
+  box-shadow: 0 8px 18px -10px rgba(20, 90, 220, 0.5);
+}
+
+.sc-login-submit-btn .sc-login-submit-arrow {
+  font-size: 15px;
+  line-height: 1;
+}
+
+/* 语言开关：保留 iOS 滑块结构，配色换成设计稿 */
+.sc-login-lang-switch,
+.sc-login-lang-ios {
+  width: 132px;
+  height: 30px;
+  padding: 3px;
+  border: none;
+  background: #dbe7f7;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: inset 0 2px 5px rgba(20, 70, 160, 0.18), inset 0 -1px 0 rgba(255, 255, 255, 0.5);
+}
+
+.sc-login-lang-switch:hover,
+.sc-login-lang-ios:hover {
+  transform: none;
+  box-shadow: inset 0 2px 5px rgba(20, 70, 160, 0.18), inset 0 -1px 0 rgba(255, 255, 255, 0.5);
+}
+
+.sc-login-lang-switch::before,
+.sc-login-lang-ios::before,
+.sc-login-lang-switch::after,
+.sc-login-lang-ios::after {
+  display: none;
+}
+
+.sc-login-lang-option,
+.sc-login-lang-ios .sc-login-lang-seg {
+  color: #6f93c9;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+
+.sc-login-lang-option.active,
+.sc-login-lang-ios .sc-login-lang-seg.active,
+button.sc-login-lang-seg.active {
+  color: #ffffff;
+  text-shadow: 0 1px 2px rgba(10, 40, 120, 0.25);
+}
+
+.sc-login-lang-thumb,
+.sc-login-lang-ios-thumb {
+  background: linear-gradient(100deg, #0a3fc9 0%, #2f8dff 55%, #3fc4ff 100%);
+  box-shadow:
+    0 6px 14px -3px rgba(20, 90, 220, 0.55),
+    0 2px 3px rgba(20, 90, 220, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    inset 0 -3px 5px rgba(0, 0, 30, 0.18);
+}
+
+.sc-login-lang-thumb::before,
+.sc-login-lang-ios-thumb::before {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0));
+}
+
+/* 二级密码页（同卡片语言）：箭头与标题同行，标题在**整张卡片**上真居中
+   为什么用三栏网格：只给「箭头 + 标题」做 flex 时，标题是在箭头右侧的剩余空间里居中，
+   整块会被推右（参考图里就偏了 20px，看着歪）。右侧补一个等宽占位栏才能真居中。 */
+.sc-secondary-header {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) 30px;
+  gap: 0;
+  align-items: center;
+  min-height: 0;
+  padding: clamp(18px, 5dvh, 26px) clamp(16px, 5vw, 32px) 0;
+  background: transparent;
+  color: #14336b;
+  border-radius: 24px 24px 0 0 !important;
+  position: static;
+}
+
+.sc-secondary-back {
+  position: static;
+  grid-column: 1;
+  justify-self: start;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: transparent;
+  color: #2f6fef;
+  font-size: 14px;
+  transition: background 0.2s ease;
+}
+
+.sc-secondary-back:active {
+  background: rgba(47, 111, 239, 0.1);
+}
+
+.sc-secondary-title {
+  grid-column: 2;
+  min-width: 0;
+  margin: 0;
+  text-align: center;
+  /* 手机上让标题保持单行（参考图就是一行）；桌面回到设计稿的 20px */
+  font-size: clamp(14px, 4.1vw, 20px);
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: -0.2px;
+  white-space: nowrap;
+  color: #14336b;
+}
+
+.sc-login-card--secondary .sc-login-card-content {
+  padding: 8px clamp(16px, 5vw, 32px) clamp(20px, 5.5dvh, 32px);
+}
+
+.sc-secondary-lead {
+  margin: 10px 0 clamp(18px, 5dvh, 26px);
+  text-align: center;
+  font-size: clamp(11.5px, 3.2vw, 12.5px);
+  line-height: 1.6;
+  color: #7c93b8;
+}
+
+.sc-login-card--secondary .sc-login-form {
+  gap: 24px;
+}
+
+body.bg .sc-login-card--secondary .sc-login-input {
+  height: 48px;
+  min-height: 48px;
+  padding: 0 46px;
+  border-width: 1.5px;
+  border-color: #bcd9fb;
+  border-radius: 999px;
+  color: #35538c;
+  letter-spacing: 1px;
+  box-shadow: inset 0 1px 2px rgba(20, 70, 160, 0.05);
+}
+
+body.bg .sc-login-card--secondary .sc-login-input:focus {
+  border-color: #4f8ef0;
+  box-shadow: 0 0 0 4px rgba(79, 142, 240, 0.12);
+}
+
+body.bg .sc-login-card--secondary .sc-login-input::placeholder {
+  color: #a9c3e6;
+  letter-spacing: normal;
+}
+
+.sc-login-card--secondary .sc-login-input-icon {
+  left: 18px;
+  color: #4f8ef0;
+}
+
+.sc-login-card--secondary .sc-login-submit-btn {
+  height: 44px;
+  min-height: 44px;
+}
+
+.sc-secondary-error {
+  background: rgba(254, 226, 226, 0.75);
+  border: 1px solid #fecaca;
+  color: #991b1b;
+  border-radius: 13px;
+}
+
+.sc-secondary-checking {
+  color: #7c93b8;
+}

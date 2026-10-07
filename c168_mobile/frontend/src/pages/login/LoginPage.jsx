@@ -10,6 +10,21 @@ import { extractPlainTextFromRichText } from "../../utils/content/richTextSaniti
 import { isNative } from "../../lib/biometricStore.js";
 import { useBiometricEnrol, BiometricEnrolModal } from "../../components/lock/BiometricEnrolModal.jsx";
 import { readLastCompanyId, writeLastCompanyId } from "../../lib/lastLoginPrefs.js";
+import { onBrandLogoError } from "../../lib/brandAssets.js";
+
+// 登录页 logo：先播拼图动图（webp，54 帧），放完换成静态图。
+// 时序取自设计稿：gif/webp 的完整帧在 2.12–2.91s 稳住，所以 2.5s 切换正好落在稳住的帧上，
+// 切过去和静态图长得一样，肉眼看不到跳变。
+const LOGO_ANIMATION_MS = 2500;
+const LOGO_ANIM = "/images/count_logo_puzzle_animation.webp";
+const LOGO_STATIC = "/images/count_logo.webp";
+
+function initialLogoSrc() {
+  try {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return LOGO_STATIC;
+  } catch (e) {}
+  return LOGO_ANIM;
+}
 import {
   getPasskeyId,
   hasPasskeyOnDevice,
@@ -165,6 +180,16 @@ export default function LoginPage() {
   const [modal, setModal] = useState({ open: false, title: "Notice", message: "" });
   const [submitting, setSubmitting] = useState(false);
   const [lang, setLang] = useState(() => readLoginLang());
+  const [logoSrc, setLogoSrc] = useState(initialLogoSrc);
+
+  useEffect(() => {
+    if (logoSrc !== LOGO_ANIM) return undefined;
+    // 先把静态图预加载好，再切，避免切换瞬间白一下
+    const preload = new Image();
+    preload.src = LOGO_STATIC;
+    const timer = setTimeout(() => setLogoSrc(LOGO_STATIC), LOGO_ANIMATION_MS);
+    return () => clearTimeout(timer);
+  }, [logoSrc]);
 
   const verifyTimeoutRef = useRef(null);
   const langThumbRef = useRef(null);
@@ -540,6 +565,14 @@ export default function LoginPage() {
     <>
       <div className="sc-login-column">
         <div className="sc-login-shell">
+          <div className="sc-login-brand">
+            <div className="sc-login-brand-logo">
+              <img src={logoSrc} alt="" onError={onBrandLogoError} data-logo-kind="brand" />
+            </div>
+            <h1 className="sc-login-title">{i18n.title}</h1>
+            <p className="sc-login-tagline">{i18n.tagline}</p>
+          </div>
+
           {maintenanceVisible && (
             <div className="sc-login-maintenance-wrapper">
               <div className="sc-login-maintenance-track">
@@ -647,6 +680,7 @@ export default function LoginPage() {
 
                 <button type="submit" className="sc-login-btn sc-login-submit-btn" disabled={submitting}>
                   <span>{submitting ? i18n.loggingIn : i18n.login}</span>
+                  <i className="fas fa-arrow-right sc-login-submit-arrow" aria-hidden="true" />
                 </button>
 
                 <div className="sc-login-lang-ios-wrap">
