@@ -120,6 +120,35 @@ const PASSKEY_FLAG_KEY = "ec_passkey_on_device";
  */
 const PASSKEY_ID_KEY = "ec_passkey_id";
 
+/**
+ * 「刚点过退出登录」的一次性标记：登录页用它决定**不要**自动弹刷脸。
+ *
+ * 为何需要：登录页设计成“打开 App 就刷脸”（无点击立即调解）。但用户主动点
+ * 退出登录后，同一个页面立刻又弹一次 Face ID 并把人刷回去 —— 实机反馈就是
+ * “点了退出，跳出弹窗，刷完又进去了”，看起来像退不掉。
+ * 只跳过一次：条件是重新进 App / 刷新页面时仍然照旧自动弹。
+ */
+const SKIP_AUTO_LOGIN_ONCE_KEY = "ec_skip_passkey_autologin_once";
+
+export function skipNextPasskeyAutoLogin() {
+  try {
+    sessionStorage.setItem(SKIP_AUTO_LOGIN_ONCE_KEY, "1");
+  } catch {
+    /* 隐私模式不可用，忽略 */
+  }
+}
+
+/** 读一次就清掉：只对紧接着的那一次登录页挂载生效。 */
+export function consumeSkipPasskeyAutoLogin() {
+  try {
+    const skip = sessionStorage.getItem(SKIP_AUTO_LOGIN_ONCE_KEY) === "1";
+    if (skip) sessionStorage.removeItem(SKIP_AUTO_LOGIN_ONCE_KEY);
+    return skip;
+  } catch {
+    return false;
+  }
+}
+
 export function markPasskeyOnDevice(credentialId = "") {
   try {
     localStorage.setItem(PASSKEY_FLAG_KEY, "1");

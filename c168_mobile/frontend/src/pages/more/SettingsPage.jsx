@@ -36,10 +36,13 @@ import {
 import { registerDeviceToken, revokeDeviceToken } from "../../lib/deviceTokenApi.js";
 import {
   createPasskey,
+  hasPasskeyOnDevice,
   isStandaloneWebApp,
   listPasskeys,
+  markPasskeyOnDevice,
   passkeyErrorMessage,
   removeAllPasskeys,
+  skipNextPasskeyAutoLogin,
   webauthnSupported,
 } from "../../lib/webauthn.js";
 import "./more.css";
@@ -130,6 +133,8 @@ export default function SettingsPage() {
     } finally {
       // 产品要求：退出登录时清掉记住的公司 ID（下次登录需重新输入）
       clearLastCompanyId();
+      // 主动退出后不要立刻又弹一次刷脸把人自动登回来（实机反馈：点了退出→弹窗→刷完又进去了）
+      skipNextPasskeyAutoLogin();
       navigate("/login", { replace: true });
     }
   }, [navigate]);
@@ -279,8 +284,33 @@ export default function SettingsPage() {
       try {
         if (bioMode === "passkey") {
           if (enable) {
+            // 本机已经有这把 passkey 就不要再注册。
+            // 每次 create() 都会弹一次系统的「Add Passkey」，而钥匙已在钥匙串里，
+            // 重复注册对用户毫无价值 —— 实机反馈就是“注销后又被弹一次 Add Passkey”。
+            // 两个条件都要：只看服务端 count 会把「换了另一部手机」误判成已经开好了。
+            const existing = await listPasskeys();
+            if (hasPasskeyOnDevice() && (existing.count || 0) > 0) {
+              setBioCount(existing.count || 0);
+              setBioEnabled(true);
+              saveSettings({ enabled: true, method: METHOD.PASSKEY });
+              setBioDiag(`mode=passkey tap=on SKIP count=${existing.count}`);
+              return;
+            }
             const created = await createPasskey(getDeviceName());
             if (!created.ok) {
+              // InvalidStateError = 系统拒绝了重复注册（这把凭据已经在本机）：
+              // 这不是失败，按“已开启”收尾；否则开关会弹回 Off，用户再点一下就又弹一次 Add Passkey。
+              if (created.code === "InvalidStateError") {
+                const settled = await listPasskeys();
+                if ((settled.count || 0) > 0) {
+                  markPasskeyOnDevice();
+                  setBioCount(settled.count || 0);
+                  setBioEnabled(true);
+                  saveSettings({ enabled: true, method: METHOD.PASSKEY });
+                  setBioDiag(`mode=passkey tap=on ALREADY count=${settled.count}`);
+                  return;
+                }
+              }
               // 不再把 NotAllowedError 当成“用户取消”而静默吞掉：
               // 它同时也是“没有用户手势 / 超时 / 策略不允许”的代码。
               setBioError(passkeyErrorMessage(lang, created.code, i18n.bioEnableFailed));

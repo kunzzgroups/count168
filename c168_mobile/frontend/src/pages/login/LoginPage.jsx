@@ -28,6 +28,7 @@ function initialLogoSrc() {
 import {
   getPasskeyId,
   hasPasskeyOnDevice,
+  consumeSkipPasskeyAutoLogin,
   passkeyErrorMessage,
   startConditionalPasskeyLogin,
   tryImmediatePasskeyLogin,
@@ -376,6 +377,10 @@ export default function LoginPage() {
 
     // 已登录就绝不碰 passkey（否则会先弹一次系统界面再被跳进 App）
     if (!passkeyMayRun) return undefined;
+
+    // 主动退出登录后的那一次不要立即弹刷脸：用户刚明确要离开，立刻又刷进来
+    // 看着就像“没退出成功”（实机反馈过）。自动填充栏的条件式调解仍在。
+    if (consumeSkipPasskeyAutoLogin()) return undefined;
 
     // 仅在**本机注册过** passkey 时动作。
     //
