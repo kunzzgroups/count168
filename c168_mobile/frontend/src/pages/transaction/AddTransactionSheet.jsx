@@ -366,7 +366,8 @@ export default function AddTransactionSheet({
     setRateCurrencyTo("");
     setRateCurrencyFromAmount("");
     setRateFullAmount("");
-    setRateExchangeRateRaw("");
+    /* Desktop parity (6f1c39f5e7): the exchange rate survives a submit — the same rate is
+       commonly used across several accounts, so clearing it here is pure friction. */
     setRateCurrencyToAmount("");
     setRateToAmountGrossStr("");
     setRateFromAmountGrossStr("");

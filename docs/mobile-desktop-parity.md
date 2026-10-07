@@ -152,7 +152,50 @@ PY
 
 ---
 
-## 7. 踩坑
+## 7. 2026-07~08 窗口审计记录（进行中）
+
+2026-09 之前的桌面提交也已按同一方法筛过一遍：
+
+| 阶段 | 条数 |
+|---|---|
+| 窗口内桌面源码提交 | 941（其中 193 条是同一修复的 cherry-pick 重复） |
+| 落在电话版**没有的页面** → 跳过 | 317 |
+| 能对上电话版提交（其提交信息引用了桌面 sha / 同主题）→ 已对齐 | 304 |
+| 剩下候选 | 127 |
+| 再剔除桌面专属「面板绘制/动画/性能/侧栏」类 | 58 → 剩 **69** |
+| 从 69 里挑出「像业务行为」的派单核验（transaction 10 / dashboard 9 / account 等 12） | 31 |
+| 核验结论：真缺口 | **7**（见下） |
+
+### 本轮已修（2）
+
+| 桌面提交 | 内容 | 电话版改动 |
+|---|---|---|
+| `6061c29ba5` | accounts 实时事件后重拉 TX 的 To/From 选项 | `hooks/useMobileTransaction.js`：新增 `REALTIME_DOMAINS.ACCOUNTS` 订阅 + `accountsNonce`，**只重拉选项**（不重搜列表，与桌面同思路） |
+| `6f1c39f5e7` | 提交后汇率被清空 | `AddTransactionSheet.jsx` 的 `resetForm` 不再清 `rateExchangeRateRaw`（sheet 由 `open` 控制、组件不卸载，状态会保留） |
+
+### 已核实但尚未修（4）——下一批
+
+| 桌面提交 | 内容 | 为什么缓一步 |
+|---|---|---|
+| `b59f77174f` | contra 拒结用 `window.confirm` → 改应用内确认面板 | 纯手机 UI 交互（原生 confirm 在 WebView 里是原生弹框）；需照现有 `m-mt-confirm` 写法新建面板 |
+| `19349a3611` | 独立公司（不属于任何 group）的币种来源应用 scope-account 接口 | 会改数据口径（`get_company_currencies_api` → `get_scope_account_currencies_api`），需先确认真机上想要的显示 |
+| `276125d07f` | 独立公司无 group 时 Company All 被禁用 | 同上，属功能放开；`useMobileDashboard.js` 的 `if (!selectedGroup) return;` 是早退点 |
+| `5b0455a06e` | group tenant：currency order 缺 group 维度 + 空 group 启动早退 | 涉及 `transactionApi.js` 加 `group_id` 参数与缓存键改 `g:<id>`，影响面较大 |
+
+### 已核实为「不适用 / 已对齐」的典型例子
+
+- `ba8d61e3ec` / `88c83b283d`（Rate-Mul 负数规则）：该规则后来又被 `0dbecde1ca` 改过；用 `diff` 比对 `transactionSubmitHelpers.js` 两边**除 import 行外逐字节相同** → 已对齐。
+- `29dc57b5bb`（payment history 按 DMY 分月）：`lib/transactionHistoryProgressive.js` 两边 diff 为空 → 已对齐。
+- `d235813173`（aктивe/inactive 状态过滤）：改动主体在后端 `api/accounts/accountlistapi.php`（两端共用）；电话版账号页只有一个 Show Inactive 开关，其请求与新后端语义一致 → 无需同步（电话版没有「Active + Inactive 并列」的开关）。
+- `156f3e80cf` / `ab5b7684b8` 等：改动在后端 / 部署配置，两端共用，天然对齐。
+
+### 未逐条核的部分（诚实声明）
+
+69 条里剩下的 ~38 条尚未逐条核实（大部分看名字仍是 dashboard 面板绘制/动画/实时总线内部实现，已被归为不适用，但没有逐条验证）。如需继续，按同样流程分批（每批 ~30 条）推进。
+
+---
+
+## 8. 踩坑
 
 1. **`git log --name-only` 带 pathspec 时只会列该 pathspec 下的文件** —— 想统计「桌面提交有没有同时改电话版」时不能写 `-- frontend/src`，否则永远统计出 0。正确做法：不带 pathspec，取回全部文件名后在脚本里过滤。
 2. **桌面历史里同一修复常有 2–4 个 cherry-pick 副本**（com/org/site 三线合并导致），统计时要按提交主题去重，否则数量翻倍。

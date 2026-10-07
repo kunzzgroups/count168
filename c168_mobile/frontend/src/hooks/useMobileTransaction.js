@@ -148,6 +148,8 @@ export function useMobileTransaction({ listPaused = false } = {}) {
   const [toast, setToast] = useState(null);
   const [sessionNonce, setSessionNonce] = useState(0);
   const [reloadNonce, setReloadNonce] = useState(0);
+  /** Bumped by the accounts realtime event: refetches To/From options into local state only. */
+  const [accountsNonce, setAccountsNonce] = useState(0);
   const searchSeq = useRef(0);
   /** After restoring a list snapshot (Back from history), skip the next auto search once. */
   const skipNextSearchRef = useRef(false);
@@ -1004,6 +1006,25 @@ export function useMobileTransaction({ listPaused = false } = {}) {
     },
     { enabled: scopeReady && !listPaused },
   );
+
+  // SSE ACCOUNTS → refetch the To/From picker options only (desktop parity, 6061c29ba5): an
+  // account created / renamed / deactivated elsewhere would otherwise stay stale in this form
+  // until a full reload. Deliberately separate from reloadNonce so the list itself is not re-searched.
+  useRealtimeDomain(
+    REALTIME_DOMAINS.ACCOUNTS,
+    () => {
+      if (listPaused) return;
+      setAccountsNonce((n) => n + 1);
+    },
+    { enabled: scopeReady && !listPaused },
+  );
+
+  useEffect(() => {
+    if (!scopeReady || listPaused || accountsNonce === 0) return undefined;
+    const ac = new AbortController();
+    void loadAccountsAndCurrencies(ac.signal);
+    return () => ac.abort();
+  }, [accountsNonce, scopeReady, listPaused, loadAccountsAndCurrencies]);
 
   // Fallback when SSE is down: focus / visibility + slow poll.
   useEffect(() => {
