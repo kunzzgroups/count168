@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { useOverlayLock } from "../../hooks/useOverlayLock.js";
 import { formatTransactionGridMoneyHalfUp, toUpperDisplay } from "../../lib/transactionFormat.js";
 import { moneyToneClass } from "../../lib/money/moneyToneClass.js";
@@ -23,6 +24,12 @@ export default function ContraInboxSheet({
   mutationsBlocked,
 }) {
   useOverlayLock(open, onClose);
+  /** Desktop parity (b59f77174f): reject asks inside the app instead of window.confirm. */
+  const [rejectTarget, setRejectTarget] = useState(null);
+  /* Both hooks stay above the early return below — a hook after it would break the render order. */
+  useEffect(() => {
+    if (!open) setRejectTarget(null);
+  }, [open]);
   if (!open) return null;
 
   const count = items.length;
@@ -46,7 +53,33 @@ export default function ContraInboxSheet({
         </div>
 
         <div className="m-contra-sheet-body">
-          {loading ? (
+          {rejectTarget ? (
+            <div className="m-contra-sheet-empty">
+              <p className="m-contra-sheet-empty-title">{m.confirmRejectContra}</p>
+              <div className="m-contra-item-actions">
+                <button
+                  type="button"
+                  disabled={mutationsBlocked}
+                  onClick={() => setRejectTarget(null)}
+                  className="m-contra-btn tap-scale"
+                >
+                  {m.backToList}
+                </button>
+                <button
+                  type="button"
+                  disabled={mutationsBlocked}
+                  onClick={() => {
+                    const target = rejectTarget;
+                    setRejectTarget(null);
+                    onReject?.(target.id);
+                  }}
+                  className="m-contra-btn m-contra-btn--reject tap-scale"
+                >
+                  {m.reject}
+                </button>
+              </div>
+            </div>
+          ) : loading ? (
             <p className="m-contra-sheet-loading">{m.loading}</p>
           ) : count === 0 ? (
             <div className="m-contra-sheet-empty">
@@ -115,9 +148,7 @@ export default function ContraInboxSheet({
                     <button
                       type="button"
                       disabled={mutationsBlocked}
-                      onClick={() => {
-                        if (window.confirm(m.confirmRejectContra)) onReject?.(id);
-                      }}
+                      onClick={() => setRejectTarget({ id })}
                       className="m-contra-btn m-contra-btn--reject tap-scale"
                     >
                       {m.reject}

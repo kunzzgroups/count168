@@ -166,20 +166,20 @@ PY
 | 从 69 里挑出「像业务行为」的派单核验（transaction 10 / dashboard 9 / account 等 12） | 31 |
 | 核验结论：真缺口 | **7**（见下） |
 
-### 本轮已修（2）
+### 本轮已修（3）
 
 | 桌面提交 | 内容 | 电话版改动 |
 |---|---|---|
 | `6061c29ba5` | accounts 实时事件后重拉 TX 的 To/From 选项 | `hooks/useMobileTransaction.js`：新增 `REALTIME_DOMAINS.ACCOUNTS` 订阅 + `accountsNonce`，**只重拉选项**（不重搜列表，与桌面同思路） |
 | `6f1c39f5e7` | 提交后汇率被清空 | `AddTransactionSheet.jsx` 的 `resetForm` 不再清 `rateExchangeRateRaw`（sheet 由 `open` 控制、组件不卸载，状态会保留） |
+| `b59f77174f` | contra 拒结用 `window.confirm` | `ContraInboxSheet.jsx` 改为应用内确认面板（复用现有类，不加 CSS）：点 Reject → 面板出来、列表收起 → 确认才 `onReject(id)`；两个 hook 都放在 `if (!open) return null` **之前**，避免 hooks 顺序错误；关闭 sheet 时清掉待确认状态 |
 
-### 已核实但尚未修（4）——下一批
+### 已核实但尚未修（3）——下一批
 
 | 桌面提交 | 内容 | 为什么缓一步 |
 |---|---|---|
-| `b59f77174f` | contra 拒结用 `window.confirm` → 改应用内确认面板 | 纯手机 UI 交互（原生 confirm 在 WebView 里是原生弹框）；需照现有 `m-mt-confirm` 写法新建面板 |
-| `19349a3611` | 独立公司（不属于任何 group）的币种来源应用 scope-account 接口 | 会改数据口径（`get_company_currencies_api` → `get_scope_account_currencies_api`），需先确认真机上想要的显示 |
-| `276125d07f` | 独立公司无 group 时 Company All 被禁用 | 同上，属功能放开；`useMobileDashboard.js` 的 `if (!selectedGroup) return;` 是早退点 |
+| `19349a3611` | 独立公司（不属于任何 group）的币种来源应用 scope-account 接口 | **与 `276125d07f` 连体**：电话版在无 group 时 Company All 被禁用，所以这条的生效路径根本进不去；两条要一起改。会改数据口径（`get_company_currencies_api` → `get_scope_account_currencies_api`），且 dashboard 是电话版最重的页，单独分批做 |
+| `276125d07f` | 独立公司无 group 时 Company All 被禁用 | 同上。早退点在 `useMobileDashboard.js` 的 `if (!selectedGroup) return;`，禁用条件在 `FilterSheet.jsx` 的 Pill |
 | `5b0455a06e` | group tenant：currency order 缺 group 维度 + 空 group 启动早退 | 涉及 `transactionApi.js` 加 `group_id` 参数与缓存键改 `g:<id>`，影响面较大 |
 
 ### 已核实为「不适用 / 已对齐」的典型例子
