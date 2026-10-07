@@ -95,6 +95,17 @@ export default function SettingsPage() {
    * 初始值故意非空：如果连这一行都不显示，那就不是探测失败而是**包没更新**。
    */
   const BIO_BUILD = "b27";
+  /** 诊断行开关：默认关（普通用户不看），需要时加 ?bio_debug=1 或 localStorage.ec_bio_debug=1 */
+  const [bioDebug] = useState(() => {
+    try {
+      return (
+        new URLSearchParams(window.location.search).get("bio_debug") === "1" ||
+        window.localStorage.getItem("ec_bio_debug") === "1"
+      );
+    } catch {
+      return false;
+    }
+  });
   const [bioDiag, setBioDiag] = useState("boot");
   const i18n = useMemo(() => MORE_I18N[lang] || MORE_I18N.en, [lang]);
 
@@ -494,44 +505,18 @@ export default function SettingsPage() {
             </div>
 
             {/*
-             * 安卓专用：让用户选「指纹」还是「人脸」。
+             * 只留一个 on / off 开关。
              *
-             * ⚠️ 这里**故意不依赖任何探测**（曾经用 checkBiometry().biometryTypes
-             * 判断“有没有两种硬件” —— 而 checkBiometry() 在安卓上报过不应答，
-             * 一旦不应答就永远不会显示这一行）。
-             *
-             * 不靠探测也不会出错，因为这只是个**偏好**：
-             *   选指纹 → 传 strong（只出指纹）
-             *   选人脸 → 传 weak；手机没录入人脸时，系统会自动退回指纹，不会卡住。
-             *
-             * 也不等开关先打开 —— 用户的第一反应就是进设置找这个选项，
-             * 藏在“必须先开启”后面会让人以为没做。
+             * 安卓曾经额外有一行「Unlock with」让人选指纹 / 人脸；产品要求去掉，
+             * 方式改由探测自动选（probeAndroid → capabilityFromProbe → autoSwitchTarget）。
+             * 保留的理由曾经是“两种硬件都有时让用户选”，但模型里 method 仍会落一个
+             * 明确值（默认 FINGERPRINT），且系统在没有录入人脸时会自动退回指纹，
+             * 所以少这一行不会把用户卡住。
              */}
-            {bioMode === "native" ? (
-              <div className="m-more-settings-row">
-                <span>{i18n.bioModality || "Unlock with"}</span>
-                <MobileOnOffSwitch
-                  on={bioModality === METHOD.FACE}
-                  disabled={false}
-                  wide
-                  onChange={(next) => {
-                    // 切换方式 = 一次完整的状态转移（规格 §11）：
-                    // 校验 → 持久化 → 重建状态。不保留任何旧方式的痕迹。
-                    const value = next ? METHOD.FACE : METHOD.FINGERPRINT;
-                    const saved = saveSettings({ enabled: true, method: value });
-                    setBioModality(saved.method);
-                  }}
-                  ariaLabel={i18n.bioModality || "Unlock with"}
-                  onLabel={i18n.bioModalityFace || "Face"}
-                  offLabel={i18n.bioModalityFingerprint || "Fingerprint"}
-                />
-              </div>
-            ) : null}
 
-            {/* 诊断行：本次排查专用，初始值就是 "boot"，
-                所以只要这行不出现，就说明设备跑的不是新包（而不是探测失败）。
-                功能稳下来后连同 BIO_BUILD 一起删。 */}
-            {bioDiag ? (
+            {/* 诊断行：只在 ?bio_debug=1（或 localStorage.ec_bio_debug=1）时出现。
+                真机排查时用，普通用户看不到；排查完可连同 BIO_BUILD 一起删。 */}
+            {bioDebug && bioDiag ? (
               <p className="m-more-settings-hint">{`[${BIO_BUILD}] ${bioDiag}`}</p>
             ) : null}
 
