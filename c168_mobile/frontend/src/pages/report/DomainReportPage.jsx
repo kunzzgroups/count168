@@ -7,8 +7,10 @@ import {
   companyIsBankOnly,
   fetchDomainReport,
   formatReportAmount,
+  isGroupLedgerDeniedError,
   reportAmountTone,
 } from "../../lib/reportApi.js";
+import { resolveCompanyPickForGroup } from "../../lib/dashboardScope.js";
 import {
   maintenanceScopeIsReady,
   maintenanceScopeKey,
@@ -55,7 +57,7 @@ function DomainTotalStrip({ i18n, totals }) {
 export default function DomainReportPage() {
   const s = useMaintenanceSession({ canAccess: canShowReportEntry });
   const i18n = useMemo(() => reportText(s.lang), [s.lang]);
-  const { scope } = s;
+  const { scope, applyScope, companies, allowedGroupIds } = s;
 
   const boot = useMemo(() => defaultThisMonth(), []);
   const [dateFrom, setDateFrom] = useState(boot.dateFrom);
@@ -95,6 +97,22 @@ export default function DomainReportPage() {
         setTotals(json?.totals || null);
       } catch (e) {
         if (e?.name === "AbortError" || seq !== seqRef.current) return;
+        /* Desktop parity (36495fb2fc): the group-only pre-check can wrongly allow a group ledger
+           the session is not assigned to. When the backend rejects it, fall back to a reportable
+           subsidiary in that group instead of leaving the page stranded on an error. */
+        if (!soft && scope.mode !== "company" && isGroupLedgerDeniedError(e)) {
+          const gid = scope.groupId || (allowedGroupIds.length === 1 ? allowedGroupIds[0] : null);
+          const pick = gid ? resolveCompanyPickForGroup(companies, gid, scope.companyId) : null;
+          if (pick?.id) {
+            const ok = await applyScope({
+              mode: "company",
+              companyId: Number(pick.id),
+              groupId: gid,
+            });
+            /* The scope change re-runs this loader, so never paint the error here. */
+            if (ok) return;
+          }
+        }
         if (!soft) {
           setListError(e?.message || i18n.loadFailed);
           setRows([]);
@@ -104,7 +122,7 @@ export default function DomainReportPage() {
         if (seq === seqRef.current && !soft) setListLoading(false);
       }
     },
-    [scope, scopeReady, dateFrom, dateTo, processId, i18n.loadFailed],
+    [scope, applyScope, companies, allowedGroupIds, scopeReady, dateFrom, dateTo, processId, i18n.loadFailed],
   );
 
   useEffect(() => {

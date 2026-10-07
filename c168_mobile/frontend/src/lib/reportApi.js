@@ -408,3 +408,20 @@ export async function fetchCustomerReport(
   }
   return fetchCustomerReportOnce({ ...args, scope }, { signal });
 }
+
+/**
+ * Message the scope APIs throw when the session is not assigned to the requested group ledger
+ * (`api/transactions/get_scope_account_currencies_api.php`, `dashboard_api.php`).
+ */
+const GROUP_LEDGER_DENIED_MESSAGE = "无权访问该 Group Ledger";
+
+/**
+ * Desktop parity (36495fb2fc, `frontend/src/pages/report/shared/reportGcBoot.js`): true when a
+ * report fetch failed because the session was denied access to the group ledger it asked for.
+ * The frontend's group-only pre-check can wrongly allow entering such a ledger; the report pages
+ * use this to fall back to a reportable subsidiary instead of stranding the page on an error.
+ */
+export function isGroupLedgerDeniedError(err) {
+  const msg = err?.message;
+  return typeof msg === "string" && msg.includes(GROUP_LEDGER_DENIED_MESSAGE);
+}

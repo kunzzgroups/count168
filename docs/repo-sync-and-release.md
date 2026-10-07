@@ -199,6 +199,7 @@ curl -sS https://www.count168.com/app/EazyCount-v1.4.apk | md5sum   # 与本地 
 - [ ] 三站首页 / 登录页 200；`/app/` 200 且下载的 APK 指向自己域名
 - [ ] 手机版 `/c168_mobile/login` 200，bundle 名与仓库 `c168_mobile/frontend/dist/index.html` 一致
 - [ ] 三站前端 bundle 名一致（以 site 为准）
+- [ ] 本次桌面侧修复若落在「电话版也有对应页面」的功能上，已按 [`docs/mobile-desktop-parity.md`](mobile-desktop-parity.md) 打上 `[mobile: 需同步]` 并同步（见该文档第 2 节约定）
 
 ---
 

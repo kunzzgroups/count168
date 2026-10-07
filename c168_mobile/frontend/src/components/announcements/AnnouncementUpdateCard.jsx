@@ -93,7 +93,10 @@ export default function AnnouncementUpdateCard({
       : "");
 
   if (collapsed) {
-    const preview = parsed.items[0] || subtitle || parsed.title;
+    /* Items are HTML now (links survive) — the collapsed preview must stay plain text. */
+    const preview = String(parsed.items[0] || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim()
+      || subtitle
+      || parsed.title;
     return (
       <div className={className} onClick={onClick} role={onClick ? "button" : undefined}>
         <div className="m-ann-header">
@@ -140,7 +143,7 @@ export default function AnnouncementUpdateCard({
         {parsed.items.map((item, index) => (
           <li key={`${index}-${item.slice(0, 24)}`} className="m-ann-item">
             <span className="m-ann-item-index">{padIndex(index)}</span>
-            <span className="m-ann-item-text">{item}</span>
+            <span className="m-ann-item-text" dangerouslySetInnerHTML={{ __html: item }} />
           </li>
         ))}
       </ol>

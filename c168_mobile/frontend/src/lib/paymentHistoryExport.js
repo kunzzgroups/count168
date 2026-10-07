@@ -5,6 +5,88 @@ import { orderCurrencyCodesForCompany } from "./currencyOrder.js";
 import { formatPaymentHistoryMoney, formatRateForHistoryDisplay, getHistoryRemark } from "./transactionFormat.js";
 import MoneyDecimal from "./money/moneyDecimal.js";
 
+/* ---------------------------------------------------------------------------------------
+ * CJK font for PDF export — desktop parity (5554c6921a / 82eb85d220 "PDF font size when got
+ * chinese word become thinner prob", d9f2e3e845 / 0d2499e032 colour).
+ * jsPDF's built-in helvetica has no CJK glyphs, so Chinese product/description/remark cells
+ * came out broken. Ported from
+ * frontend/src/pages/transaction/lib/paymentHistoryMemberReportExport.js (two apps share no
+ * source), with two phone-specific adjustments:
+ *   - the font is fetched *only* when a report actually contains CJK (the file is ~34MB, which
+ *     is not something to pull on mobile data for an all-English report);
+ *   - only the Regular face is registered — the phone's table does not bold CJK cells, so the
+ *     desktop's extra static Bold file would be dead weight. CJK cells are forced to style
+ *     "normal" instead, which jsPDF would otherwise look up and fail on.
+ * jsPDF subsets the embedded font (a 2-row report lands at ~0.8MB, not 34MB).
+ * ------------------------------------------------------------------------------------- */
+const PDF_FALLBACK_FONT_FAMILY = "helvetica";
+const PDF_CJK_FONT_FAMILY = "NotoSansCJKsc";
+const PDF_CJK_FONT_FILE = "NotoSansCJKsc-VF.ttf";
+const PDF_CJK_FONT_URLS = [
+  "https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/Variable/TTF/NotoSansCJKsc-VF.ttf",
+  "https://cdn.jsdelivr.net/gh/notofonts/noto-cjk@main/Sans/Variable/TTF/NotoSansCJKsc-VF.ttf",
+];
+let pdfCjkFontBase64Promise = null;
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function fetchPdfFontBase64(urls) {
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, { credentials: "omit", cache: "force-cache" });
+      if (!res.ok) continue;
+      const dataUrl = await blobToDataUrl(await res.blob());
+      const payload = dataUrl.split(",")[1] || "";
+      if (payload) return payload;
+    } catch {
+      /* try next URL */
+    }
+  }
+  throw new Error("Unable to load font for PDF export");
+}
+
+function addFontToVfsOnce(doc, file, base64) {
+  const hasFile = typeof doc.existsFileInVFS === "function" ? doc.existsFileInVFS(file) : false;
+  if (!hasFile) doc.addFileToVFS(file, base64);
+}
+
+/** Registers the CJK faces on this doc; returns the family name, or null when unavailable. */
+async function ensurePdfExportFont(doc) {
+  try {
+    if (!pdfCjkFontBase64Promise) pdfCjkFontBase64Promise = fetchPdfFontBase64(PDF_CJK_FONT_URLS);
+    let base64 = "";
+    try {
+      base64 = await pdfCjkFontBase64Promise;
+    } catch {
+      pdfCjkFontBase64Promise = null;
+      throw new Error("CJK font fetch failed");
+    }
+    addFontToVfsOnce(doc, PDF_CJK_FONT_FILE, base64);
+    doc.addFont(PDF_CJK_FONT_FILE, PDF_CJK_FONT_FAMILY, "normal");
+    return PDF_CJK_FONT_FAMILY;
+  } catch {
+    return null;
+  }
+}
+
+function hasCjkText(value) {
+  const text = String(value || "");
+  if (!text) return false;
+  return /[\u3000-\u303f\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff00-\uffef]/.test(text);
+}
+
+function setPdfFontForText(doc, text, cjkFontFamily, style = "normal") {
+  const family = cjkFontFamily && hasCjkText(text) ? cjkFontFamily : PDF_FALLBACK_FONT_FAMILY;
+  doc.setFont(family, style);
+}
+
 async function parseJsonResponse(text) {
   try {
     return JSON.parse(text || "{}");
@@ -183,9 +265,16 @@ export async function downloadMemberReportPdf({
   title = "WIN/LOSE REPORT",
 }) {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const list = Array.isArray(sections) ? sections : [];
+  /* Only pull the ~34MB CJK font when a cell actually needs it; null = render with helvetica. */
+  const needsCjkFont = list.some((section) =>
+    (Array.isArray(section?.rows) ? section.rows : []).some((row) =>
+      rowToCells(row).some((cell) => hasCjkText(cell)),
+    ),
+  );
+  const cjkFontFamily = needsCjkFont ? await ensurePdfExportFont(doc) : null;
   const pageW = doc.internal.pageSize.getWidth();
   const marginX = 10;
-  const list = Array.isArray(sections) ? sections : [];
   const headers = ["Date", "Product", "Rate", "W/L", "Cr/Dr", "Bal.", "Desc.", "Remark"];
 
   list.forEach((section, idx) => {
@@ -195,11 +284,12 @@ export async function downloadMemberReportPdf({
     const totals = computeTotals(rows);
     const meta = `${accountCode || ""}${accountName ? ` (${accountName})` : ""} · ${dateFrom} – ${dateTo} · ${currency}`;
 
-    doc.setFont("helvetica", "bold");
+    const titleText = String(title || "WIN/LOSE REPORT").toUpperCase();
+    setPdfFontForText(doc, titleText, cjkFontFamily, "bold");
     doc.setFontSize(13);
     doc.setTextColor(0, 44, 73);
-    doc.text(String(title || "WIN/LOSE REPORT").toUpperCase(), marginX, 14);
-    doc.setFont("helvetica", "normal");
+    doc.text(titleText, marginX, 14);
+    setPdfFontForText(doc, meta, cjkFontFamily, "normal");
     doc.setFontSize(9);
     doc.setTextColor(71, 85, 105);
     doc.text(meta, marginX, 20);
@@ -220,8 +310,21 @@ export async function downloadMemberReportPdf({
       ],
       showFoot: "lastPage",
       theme: "grid",
+      /* Desktop parity: Chinese cells need the embedded CJK face, otherwise they come out broken. */
+      didParseCell: (hookData) => {
+        if (!cjkFontFamily) return;
+        const cellText = Array.isArray(hookData.cell?.text)
+          ? hookData.cell.text.join(" ")
+          : String(hookData.cell?.raw || "");
+        if (!hasCjkText(cellText)) return;
+        hookData.cell.styles.font = cjkFontFamily;
+        /* Only a Regular CJK face is registered, so never ask jsPDF for its bold. */
+        hookData.cell.styles.fontStyle = "normal";
+        /* Wrapped Chinese needs a little more line height than the Latin default. */
+        hookData.cell.styles.lineHeight = 1.08;
+      },
       styles: {
-        font: "helvetica",
+        font: PDF_FALLBACK_FONT_FAMILY,
         fontSize: 7.5,
         cellPadding: 1.1,
         overflow: "linebreak",
@@ -235,7 +338,9 @@ export async function downloadMemberReportPdf({
       },
       footStyles: {
         fillColor: [241, 245, 249],
-        textColor: [15, 23, 42],
+        /* Desktop parity (0d2499e032): black, so CJK glyphs coming from the embedded font
+           are not tinted dark-slate. */
+        textColor: [0, 0, 0],
         fontStyle: "bold",
       },
       columnStyles: {

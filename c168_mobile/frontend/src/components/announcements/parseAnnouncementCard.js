@@ -23,11 +23,30 @@ function stripNumberedPrefix(text) {
   return decodeText(text).replace(NUMBERED_PREFIX_RE, "");
 }
 
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function stripNumberedPrefixHtml(html) {
+  return String(html ?? "").replace(NUMBERED_PREFIX_RE, "");
+}
+
 function collectListItems(root) {
   const items = [];
   root.querySelectorAll("li").forEach((li) => {
     const text = decodeText(li.textContent);
-    if (text) items.push(stripNumberedPrefix(text));
+    if (!text) return;
+    /* Desktop parity (5ce426c1f9): keep the item's own markup so a link stays a link; the
+       plain-text form is kept for matching/preview. Content is sanitised by toSafeRenderHtml. */
+    items.push({
+      text: stripNumberedPrefix(text),
+      html: stripNumberedPrefixHtml((li.innerHTML || "").trim()),
+    });
   });
   return items;
 }
@@ -79,7 +98,7 @@ function collectNumberedFromPlain(blocks) {
   blocks.forEach((line) => {
     if (NUMBERED_PREFIX_RE.test(line)) {
       const text = stripNumberedPrefix(line);
-      if (text) items.push(text);
+      if (text) items.push({ text, html: escapeHtml(text) });
       return;
     }
     rest.push(line);
@@ -142,12 +161,12 @@ export function parseAnnouncementCard({ title = "", content = "" } = {}) {
       if (!sectionLabel) sectionLabel = line.slice(0, 80);
       return;
     }
-    if (items.some((item) => item === stripNumberedPrefix(line))) return;
+    if (items.some((item) => item.text === stripNumberedPrefix(line))) return;
     if (THANK_RE.test(line)) thankYouBlocks.push(line);
     else introBlocks.push(line);
   });
 
-  const plainBlob = [safeTitle, ...blocks, ...items].join("\n");
+  const plainBlob = [safeTitle, ...blocks, ...items.map((item) => item.text)].join("\n");
   const version = extractVersion(safeTitle, plainBlob, html);
 
   return {
@@ -156,7 +175,7 @@ export function parseAnnouncementCard({ title = "", content = "" } = {}) {
     sectionLabel,
     subtitle: introBlocks[0] || "",
     intro: introBlocks.slice(1),
-    items,
+    items: items.map((item) => item.html),
     thankYou: thankYouBlocks.join(" "),
   };
 }

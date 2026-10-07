@@ -138,6 +138,14 @@ export default function AutoRenewPage() {
         />
       </label>
       <div className="m-ar-chips" role="group" aria-label={t("pageTitle")}>
+        {/* Desktop parity (22b5a3124a): status chips are all / pending / approved / rejected —
+            the phone was missing "all", so the list could never show every status at once. */}
+        <FilterChip
+          active={api.statusFilter === "all"}
+          label={t("filterShowAll")}
+          count={api.counts.total}
+          onClick={() => api.setStatusFilter("all")}
+        />
         <FilterChip
           active={api.statusFilter === "pending"}
           label={t("filterPending")}
