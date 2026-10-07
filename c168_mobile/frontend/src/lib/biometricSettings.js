@@ -25,6 +25,15 @@ export const METHOD = {
   NONE: "NONE",
   FINGERPRINT: "FINGERPRINT",
   FACE: "FACE",
+  /**
+   * iOS（Safari / 加到主屏幕）走的是 passkey。
+   *
+   * 为何必须有这个值：模型最初是按安卓写的（指纹/人脸），而 iOS **两样都不是** ——
+   * 它没有“设备上的生物识别方式可选”，只有“有没有一把服务端凭据”。
+   * 缺了这个值，iOS 那边就永远写不进模型 → 界面永远显示 Off →
+   * 用户每点一次开关就弹一次 “Save a passkey”（实机报过）。
+   */
+  PASSKEY: "PASSKEY",
 };
 
 /** 运行时**能力**状态 —— 只活在内存里，从不持久化 */
@@ -61,7 +70,9 @@ export function normalizeSettings(raw) {
       ? METHOD.FACE
       : raw?.method === METHOD.FINGERPRINT
         ? METHOD.FINGERPRINT
-        : METHOD.NONE;
+        : raw?.method === METHOD.PASSKEY
+          ? METHOD.PASSKEY
+          : METHOD.NONE;
 
   // 不变量：开启必须有具体方式；没有方式就是关闭
   if (!enabled || method === METHOD.NONE) return disabledSettings();
@@ -128,6 +139,21 @@ export function resolveBiometric(settings, capability) {
   };
 
   if (!s.enabled) return idle;
+
+  // iOS / passkey：没有“强度”可选，凭据在服务端，能启动就是能启动。
+  // 注意它**没有** guaranteed/expected 的模态之分 —— 服务端验签名，
+  // 系统弹 Face ID 还是 Touch ID 由 iOS 自己决定，而这对我们是无差别的。
+  if (s.method === METHOD.PASSKEY) {
+    const plan = {
+      ...idle,
+      strategy: "PASSKEY",
+      expectedModality: METHOD.PASSKEY,
+      guaranteedModality: METHOD.PASSKEY,
+      promptStrength: "weak",
+    };
+    if (cap.credentialPresent === false) return { ...plan, reason: "NO_CREDENTIAL" };
+    return { ...plan, startable: true };
+  }
 
   const isFingerprint = s.method === METHOD.FINGERPRINT;
   const intent = {

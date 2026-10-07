@@ -364,6 +364,27 @@ test("其他情况仍然给按钮（未知时让用户自己决定）", () => {
   );
 });
 
+test("iOS/passkey 必须能写进模型（否则开关永远显示 Off，反复弹 Save a passkey）", () => {
+  const s = resolveBiometric({ enabled: true, method: METHOD.PASSKEY }, { state: CAP.UNKNOWN });
+  assert.equal(s.strategy, "PASSKEY");
+  assert.equal(s.startable, true);
+  assert.equal(s.method, METHOD.PASSKEY);
+
+  // 非法/未知 method 不得渡成 PASSKEY
+  assert.equal(normalizeSettings({ enabled: true, method: "passkey" }).method, METHOD.NONE);
+  assert.equal(normalizeSettings({ enabled: true, method: METHOD.PASSKEY }).method, METHOD.PASSKEY);
+});
+
+test("passkey 模式下没有可切换的“另一种方式”", () => {
+  assert.equal(autoSwitchTarget(METHOD.PASSKEY, { faceAvailable: true, fingerprintAvailable: true }), "");
+  assert.equal(canOfferMethodSwitch({ state: CAP.AVAILABLE }), true);
+});
+
+test("设置页必须把 passkey 结果写回模型（不得只看服务端计数）", () => {
+  const page = src("pages", "more", "SettingsPage.jsx");
+  assert.match(page, /method: METHOD\.PASSKEY/, "设置页没有把 passkey 写进模型");
+});
+
 /* ── 运行 ─────────────────────────────────────────────────────────── */
 
 let failed = 0;

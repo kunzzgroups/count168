@@ -90,7 +90,7 @@ export default function SettingsPage() {
    *
    * 初始值故意非空：如果连这一行都不显示，那就不是探测失败而是**包没更新**。
    */
-  const BIO_BUILD = "b24";
+  const BIO_BUILD = "b25";
   const [bioDiag, setBioDiag] = useState("boot");
   const i18n = useMemo(() => MORE_I18N[lang] || MORE_I18N.en, [lang]);
 
@@ -222,6 +222,16 @@ export default function SettingsPage() {
         // 权威状态只从模型读；这次探测顺带把旧键迁到新模型。
         // enabled 不再由“有没有凭据”**推导** —— 那是两个来源（BUG-4）；
         // 凭据是否存在本次只作为迁移时的校验输入。
+        // passkey 的凭据在**服务端**，以它为准反推模型：有凭据 = 事实上开启。
+        //
+        // 为何必须反推：iOS 的注册只写服务端凭据与本地标记，从没写过模型 ——
+        // 于是开关永远显示 Off，用户每点一次就弹一次 “Save a passkey”（实机报过：
+        // count 明明在涨，开关却弹回 Off）。
+        if (r.mode === "passkey") {
+          if (Number(r.count) > 0) saveSettings({ enabled: true, method: METHOD.PASSKEY });
+          else saveSettings(disabledSettings());
+        }
+
         const settings = ensureSettings(Boolean(r.credentialPresent));
         // 把凭据是否存在一并交给 resolver：模型里 enabled=1 但 Keystore 没令牌时，
         // 必须报 NO_CREDENTIAL，而不是假装能启动。
@@ -284,6 +294,13 @@ export default function SettingsPage() {
           const listed = await listPasskeys();
           setBioCount(listed.count || 0);
           setBioEnabled((listed.count || 0) > 0);
+          // 关键：把结果写进统一模型 —— 不写的话开关永远不会停在 On
+          // （实机：count 明明在涨，开关却弹回 Off，于是反复弹 “Save a passkey”）
+          saveSettings(
+            (listed.count || 0) > 0
+              ? { enabled: true, method: METHOD.PASSKEY }
+              : disabledSettings(),
+          );
           setBioDiag(`mode=passkey tap=${enable ? "on" : "off"} OK count=${listed.count || 0}`);
           return;
         }
