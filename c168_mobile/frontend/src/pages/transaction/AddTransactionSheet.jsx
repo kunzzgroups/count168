@@ -97,6 +97,8 @@ function AccountPicker({
   disabled,
   searchPlaceholder,
   noMatchText,
+  notLoadedText,
+  onRetry,
   closeLabel,
 }) {
   const [open, setOpen] = useState(false);
@@ -105,6 +107,18 @@ function AccountPicker({
   const searchRef = useRef(null);
 
   const rows = useMemo(() => (Array.isArray(options) ? options : []), [options]);
+
+  /* 打开面板时一行账号都没有 → 让调用方重载一次（自愈；只试一次不刷环）。 */
+  const retriedRef = useRef(false);
+  useEffect(() => {
+    if (!open) {
+      retriedRef.current = false;
+      return;
+    }
+    if (rows.length || retriedRef.current) return;
+    retriedRef.current = true;
+    onRetry?.();
+  }, [open, rows.length, onRetry]);
 
   /** Uppercased search keys per row, rebuilt only when the account list changes. */
   const searchableRows = useMemo(
@@ -253,7 +267,12 @@ function AccountPicker({
                 )}
               </button>
             )}
-            {filtered.length === 0 ? (
+            {rows.length === 0 ? (
+              /* 账号选项压根没加载出来（不是“搜不到”）：给一句实话，并让父级自己重载。
+                 之前这种情况也显示 “没有匹配的账号”，用户在搜索框里怎么打都找不到，
+                 看起来像搜索坏了。 */
+              <p className="m-tx-account-picker-empty">{notLoadedText}</p>
+            ) : filtered.length === 0 ? (
               <p className="m-tx-account-picker-empty">{noMatchText}</p>
             ) : (
               visibleRows.map((entry) => {
@@ -297,6 +316,7 @@ export default function AddTransactionSheet({
   prefill = null,
   onPrefillConsumed,
   entryIntent = "add",
+  onReloadAccounts,
 }) {
   const bodyRef = useRef(null);
   const typeBlockRef = useRef(null);
@@ -345,6 +365,8 @@ export default function AddTransactionSheet({
   const pickerLabels = {
     searchPlaceholder: m.searchAccount,
     noMatchText: m.noAccountMatch,
+    notLoadedText: m.accountsNotLoaded,
+    onRetry: onReloadAccounts,
     closeLabel: m.close,
   };
   /** Owner preference: MYR leads whenever the company offers it (same rule as Add Account). */

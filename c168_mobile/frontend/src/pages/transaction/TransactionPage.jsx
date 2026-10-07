@@ -226,6 +226,7 @@ export default function TransactionPage() {
             }}
             m={tx.m}
             accountOptions={tx.accountOptions}
+            onReloadAccounts={tx.reload}
             currencyOptions={tx.formCurrencies}
             mutationsBlocked={tx.mutationsBlocked}
             onSubmit={tx.submitTx}

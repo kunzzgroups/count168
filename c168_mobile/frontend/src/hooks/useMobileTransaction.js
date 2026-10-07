@@ -867,6 +867,12 @@ export function useMobileTransaction({ listPaused = false } = {}) {
     [me, companies],
   );
 
+  /**
+   * 手动重载：账号选项与列表搜索都挂在 reloadNonce 上。
+   * 账号选择器遇到空列表时会调它自愈（避免用户只看到“没有匹配账号”）。
+   */
+  const reload = useCallback(() => setReloadNonce((n) => n + 1), []);
+
   const applyPreset = useCallback((key) => {
     const range = periodPresetRange(key);
     if (!range) return;
@@ -1439,6 +1445,7 @@ export function useMobileTransaction({ listPaused = false } = {}) {
     dateRangeText,
     activePreset,
     applyPreset,
+    reload,
     setCustomDateRange,
     resetFilters,
     showName,
