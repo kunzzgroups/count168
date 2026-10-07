@@ -616,6 +616,7 @@ export default function LoginPage() {
               <form className="sc-login-form" onSubmit={onSubmit}>
                 <div className="sc-login-input-row">
                   <i className="fas fa-building sc-login-input-icon" />
+                  {/* 安卓键盘默认会自动首字母大写 / 自动更正，公司代码会被改成 Ms1 这种 */}
                   <input
                     id="company-id"
                     type="text"
@@ -625,12 +626,15 @@ export default function LoginPage() {
                     autoComplete="organization"
                     inputMode="text"
                     enterKeyHint="next"
+                    autoCapitalize="none"
+                    autoCorrect="off"
                     {...companyField.fieldProps}
                   />
                 </div>
 
                 <div className="sc-login-input-row">
                   <i className="fas fa-user sc-login-input-icon" />
+                  {/* 同上：用户名也不能被自动大写 / 更正 */}
                   <input
                     id="user-id"
                     type="text"
@@ -640,6 +644,8 @@ export default function LoginPage() {
                     autoComplete="username"
                     inputMode="text"
                     enterKeyHint="next"
+                    autoCapitalize="none"
+                    autoCorrect="off"
                     {...userIdField.fieldProps}
                   />
                 </div>
