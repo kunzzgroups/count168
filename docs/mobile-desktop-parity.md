@@ -94,6 +94,13 @@ node scripts/parity-scan.mjs --json               # 机器可读
 
 ---
 
+## 3.5 后端要换 Spring Boot 时看哪本
+
+手机版接桌面新版 Spring Boot 后端的开工手册 + 台账（前端零改动、老 APK 不用重发、10 个手机版独有接口是最大风险）：
+
+- [`mobile-spring-boot-migration.md`](./mobile-spring-boot-migration.md)
+- [`backend-migration.md`](./backend-migration.md)
+
 ## 4. 页面覆盖（桌面 29 个 pageKey → 电话版 15 条路由）
 
 | 桌面 pageKey | 电话版 |
