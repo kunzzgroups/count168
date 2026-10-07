@@ -161,6 +161,13 @@ cd .. && git worktree remove count168-com-merge --force && git branch -D com-mer
 > 给用户分享/指引一律用 **`https://www.count168.com/c168_mobile/login`**（或短链 `/c168_mobile`，会 302）。
 > 同时把 manifest 改为 `application/manifest+json`、`start_url` 改为 `/c168_mobile/login`（已登录时该页会自跳落地页）。
 
+> **踩坑 9：iPhone「添加到主屏幕」钉的是_当前那一页_。** 2026-10-10 客户反馈「加到主屏后还是网页」：
+> 他是在 `/app/` 安装说明页上按「分享 → 添加到主屏幕」，于是图标指向的是说明页本身，打开当然是网页。
+> 两次修正：① 安装页的 iOS 步骤改为「先点『打开 EazyCount』进手机版 → 在手机版里分享 → 添加到主屏幕」，
+> 并加红字提醒「不要在本页添加」；② 安装页在 standalone（即从这种图标打开）时直接 `location.replace` 进
+> `/c168_mobile/login`，**已存在的错误图标不用删重加就能修好**。
+> 以后再写任何引导文案，一律要求「在应用内添加」，并别把「添加到主屏幕」写成引导用户在当前页做的事。
+
 ---
 
 ## 6. 电话版 APK（一个域名一份，别混用）
