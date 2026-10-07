@@ -68,10 +68,11 @@
     <p class="sub">手机版 App · 免费安装</p>
   </header>
 
-  <!-- 已安装 -->
+  <!-- 已安装（从主屏图标打开本页时）-->
   <div class="card hidden" id="installedCard">
-    <p class="installed">✓ 你已添加 EazyCount 到主屏幕</p>
+    <p class="installed">✓ 已安装，正在打开 EazyCount…</p>
     <a class="btn" href="/c168_mobile/login">打开 EazyCount</a>
+    <p class="note">没自动跳转就点上面按钮。</p>
   </div>
 
   <!-- Android -->
@@ -93,15 +94,18 @@
   <!-- iOS -->
   <div class="card hidden" id="iosCard">
     <h2>iPhone 安装（三步）</h2>
-    <p class="hint">iOS 免下载安装，添加到主屏幕即成 App</p>
+    <p class="hint">iOS 免下载：进手机版后「添加到主屏幕」即成 App</p>
     <ol class="steps">
       <li>确认用 <b>Safari 浏览器</b>打开本页（微信 / QQ 内打开无效）</li>
-      <li>点 Safari 底部中间的<b>分享按钮</b>
+      <li>点下面蓝色按钮<b>「打开 EazyCount」</b>，先进入手机版</li>
+      <li>在手机版里点 Safari 底部中间的<b>分享按钮</b>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1d4ed8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+        → 选<b>「添加到主屏幕」</b> → 点<b>添加</b>
       </li>
-      <li>下拉找到<b>「添加到主屏幕」</b> → 点<b>添加</b>，桌面即出现 App 图标</li>
     </ol>
-    <a class="btn ghost" href="/c168_mobile/login">先去打开手机版</a>
+    <a class="btn" href="/c168_mobile/login">打开 EazyCount（先点这里）</a>
+    <p class="note">⚠ 不要在本页直接点「添加到主屏幕」：那样钉到桌面上的是这张安装说明，打开的仍是网页。
+      必须在手机版里添加，图标才指向 App。</p>
     <p class="note">图标、全屏体验与 App 一致；登录状态自动保留，不会掉签、无需重装。</p>
   </div>
 
@@ -109,14 +113,14 @@
   <div class="card hidden" id="desktopCard">
     <h2>用手机扫码安装</h2>
     <img id="qr" src="qr.png" alt="扫码打开下载页" />
-    <p class="note" style="text-align:center">iPhone 扫码后按页内三步添加到主屏幕；Android 扫码后直接下载 APK。</p>
+    <p class="note" style="text-align:center">iPhone 扫码后按页内三步：先进入手机版，再「添加到主屏幕」；Android 扫码后直接下载 APK。</p>
     <a class="btn" id="desktopApkBtn" href="EazyCount-v1.5.apk?v=6" download="EazyCount-v1.5.apk" style="margin-top:14px">⬇ 直接下载 APK（Android）</a>
     <p class="note" style="text-align:center">当前版本 1.5 · 完整文件约 7.6 MB</p>
     <p class="note" style="text-align:center">用手机打开本页时若显示成电脑版（只有二维码、没有下载按钮），点上面的按钮同样可以直接下载安装包。</p>
   </div>
 
   <footer>
-    Android：直接安装 APK · iPhone：Safari「添加到主屏幕」<br />
+    Android：直接安装 APK · iPhone：先进入手机版，再 Safari「添加到主屏幕」<br />
     安装或使用遇到问题请联系管理员
   </footer>
 
@@ -140,7 +144,13 @@
 
     if (inWeChat) document.getElementById("wechatTip").classList.add("show");
     if (standalone) {
+      /* 从主屏图标打开：说明这张图标钉的是本页（添加时会把当前页快照进去），
+         而本页只是安装说明 → 直接交给 App，用户不用删图标重加。
+         卡片先渲染出来，万一 location 被拦也有按钮可点。 */
       document.getElementById("installedCard").classList.remove("hidden");
+      try {
+        location.replace("/c168_mobile/login");
+      } catch (e) {}
     } else if (isIOS) {
       document.getElementById("iosCard").classList.remove("hidden");
     } else if (isAndroid) {
