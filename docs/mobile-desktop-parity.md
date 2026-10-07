@@ -152,7 +152,7 @@ PY
 
 ---
 
-## 7. 2026-07~08 窗口审计记录（进行中）
+## 7. 2026-07~08 窗口审计记录（完成）
 
 2026-09 之前的桌面提交也已按同一方法筛过一遍：
 
@@ -198,9 +198,28 @@ PY
 |---|---|---|
 | `464c42ab62` | 桌面 report 的币种顺序键在「组台账 + 无公司」时用 `g:GROUP`（`reportCurrencyOrderKey`），电话版 `pages/report/ReportSheets.jsx` 则回退到组内锚定公司 id | 仅影响币种 pill 顺序的来源（不是数据）；且电话版报告多为子公司口径（`36495fb2fc` 的回退），故优先级低 |
 
-### 已核实但尚未修
+### 2026-08-19 之后：50 条可能相关候选（2026-10-07 完成）
 
-**无** — 第二轮列出的三条（`276125d07f` / `19349a3611` / `5b0455a06e`）已全部修完。下面是第三轮的详情。
+方法：`git log --since=2026-08-19 -- frontend/src` 得 **101 条**；按路径剔除「只改电话版没有的页面」的 51 条 → 剩 **50 条**（其中相当一部分是 org/site 三线的 cherry-pick 重复）；然后逐条 `git show` + **文件级 diff / file:line 对照**判定。
+
+| 判定 | 条目 | 依据 |
+|---|---|---|
+| **不适用（有证据）** | `b8227ad6fd` | 桌面有两个独立日期 state（txDate/rateDate）失同步；电话版 `AddTransactionSheet.jsx:359` 就是 `const rateDate = txDate;` → 这个 bug 不可能发生 |
+| | `9a3c94308a`、`ae1cd0c599`/`05e3dfbc9b`、`56e3620654`/`a8fa52fc48` | 都改桌面 **DOM 脚本** `utils/date/dateRangePicker.js`（`#date-range-picker` 全局 id + `init()`）；电话版全仓 grep 无此依赖（`DateFilterChip`/`DateRangeCalendarSheet` 自有一套） |
+| | `ff9f1d51a3`/`ba3bab00a1` | 改 `shared/formula/resolveFormulaForDisplay.js`（公式维护页，电话版无） |
+| | `37d9dc0b31` | 改 `pages/datacapture/components/DataCaptureGridCell.jsx`（datacapture 页，电话版无） |
+| | `86e04596fa` | 桌面侧栏标签，电话版无该侧栏 |
+| | `7a38b4b218`/`0a16587fad`、`59f9185264` | 同日后继提交已 revert，无净效果 |
+| | `33ef12adc1` | 到期提醒 +1 语义；电话版无到期提醒模块（台账 §6 已记） |
+| **已对齐（文件级证据）** | `a8161adc04`、`c6378bed20`/`a87839d48d`、`94792324a5` 家族、`fbf9585597`/`1b43ba3957`、`78c3d32d43`/`1f28b6801a` | `lib/transactionSubmitHelpers.js` 与桌面差 **仅 import 行**；`lib/transactionFormat.js` 差 import + 注释（常量已同）；`lib/transactionHistoryProgressive.js` **逐字节相同** |
+| | `25a9f1616a` | 两边窗口化常量相同：桌面 `AccountSelect.jsx:13` 与电话版 `AddTransactionSheet.jsx:27` 均 `OPTION_WINDOW_STEP = 40` |
+| | `19821f05d6` | 电话版 `parseAnnouncementCard.js` 已含 `escapeHtml`/`stripNumberedPrefixHtml`/`{text,html}` 与卡片 `dangerouslySetInnerHTML`；且两边都经 `toSafeRenderHtml` 消毒 |
+| | `5d8e398d1e`/`fe9b21cea9`/`b720cfc0b8`/`5e7371d70b` | 已被 `a46a89adfc`（电话版第二批已镜像）取代；电话版 `AddTransactionSheet.jsx:503` 同为 `toAmountDeductionDec = finalFeeDec` |
+| | `f63b0ae96b`/`f732b72bf7`/`0f2bce72fe`/`7317781390` | 已由只读核查确认为已对齐（domain report 切公司走组模式） |
+| **仍未逐条验证（机制不同）** | `e1c96d78eb`/`57267405a1`/`ec3f557b47` | 三条都是桌面 report 的「刷新/boot + companies 缓存 + retry-on-arrival」；电话版 report 用的是自己的 `useMaintenanceSession`（每次直连 API、无该缓存）→ 不能靠读码判定，需真机“刷新报告页”场景复现（已列在“仍然未定”） |
+
+> 本轮 **零新增真缺口**：50 条里除上表最后一行外全部落在“已对齐”或“不适用”，且不适用都附了 file:line / grep 证据。
+
 
 > 原先与它同列、缓一步的 `19349a3611` / `276125d07f` 已于本轮修完（见下表）。
 
