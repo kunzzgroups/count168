@@ -155,6 +155,8 @@ export function transactionScopeApiParams(scope) {
 
 export function resolveTransactionCurrencyOrderCompanyId(scope, snapCompanies = []) {
   if (!scope) return null;
+  // Pure Group ledger has no company — its order lives under g:GROUP (desktop 5b0455a06e).
+  if (scope.mode === "group") return null;
   const ui = Number(scope.uiCompanyId);
   if (Number.isFinite(ui) && ui > 0) return ui;
   const scopeCid = Number(scope.scopeCompanyId);
@@ -170,4 +172,22 @@ export function resolveTransactionCurrencyOrderCompanyId(scope, snapCompanies = 
     if (Number.isFinite(first) && first > 0) return first;
   }
   return null;
+}
+
+/**
+ * Params for user_currency_order_api — desktop 5b0455a06e: a company ledger uses
+ * company_id, a pure Group ledger uses group_id (the API stores it under g:GROUP).
+ */
+export function resolveTransactionCurrencyOrderParams(scope, snapCompanies = []) {
+  if (!scope) return { companyId: null, groupId: null };
+  if (scope.mode === "group" && scope.selectedGroup) {
+    return {
+      companyId: null,
+      groupId: String(scope.selectedGroup).trim().toUpperCase(),
+    };
+  }
+  return {
+    companyId: resolveTransactionCurrencyOrderCompanyId(scope, snapCompanies),
+    groupId: null,
+  };
 }

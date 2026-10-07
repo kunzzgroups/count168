@@ -18,11 +18,21 @@ export function mergeCurrencyCodesWithSavedOrder(baseCodes, savedOrder) {
   return [...ordered, ...rest];
 }
 
-export function readCurrencyDisplayOrder(companyId) {
-  const cid = Number(companyId);
-  if (!Number.isFinite(cid) || cid <= 0) return null;
+/** Numeric company id, or `g:GROUPCODE` for a pure Group ledger (desktop 5b0455a06e). */
+function currencyOrderStorageSuffix(orderKey) {
+  if (orderKey == null || orderKey === "") return null;
+  const n = Number(orderKey);
+  if (Number.isFinite(n) && n > 0) return String(n);
+  const s = String(orderKey).trim();
+  if (/^g:/i.test(s) && s.length > 2) return s.toUpperCase();
+  return null;
+}
+
+export function readCurrencyDisplayOrder(orderKey) {
+  const key = currencyOrderStorageSuffix(orderKey);
+  if (!key) return null;
   try {
-    const raw = localStorage.getItem(`${CURRENCY_DISPLAY_ORDER_LS_PREFIX}${cid}`);
+    const raw = localStorage.getItem(`${CURRENCY_DISPLAY_ORDER_LS_PREFIX}${key}`);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed)
@@ -47,13 +57,13 @@ export function readUserCurrencyDisplayOrder() {
 }
 
 /**
- * Saved pill order for this company.
+ * Saved pill order for this company / group ledger key.
  * localStorage wins when present (last drag on this browser); otherwise use API.
  */
-export function resolveSavedCurrencyOrder(companyId, apiOrder) {
+export function resolveSavedCurrencyOrder(orderKey, apiOrder) {
   const userGlobal = readUserCurrencyDisplayOrder();
   if (userGlobal?.length) return userGlobal;
-  const fromLs = readCurrencyDisplayOrder(companyId);
+  const fromLs = readCurrencyDisplayOrder(orderKey);
   if (fromLs?.length) return fromLs;
   const fromApi = Array.isArray(apiOrder)
     ? apiOrder.map((c) => String(c).trim().toUpperCase()).filter(Boolean)
@@ -115,12 +125,12 @@ export async function saveUserCurrencyOrder(order, { companyId, groupId } = {}) 
   return json;
 }
 
-export function persistCurrencyDisplayOrder(companyId, order) {
-  const cid = Number(companyId);
-  if (!Number.isFinite(cid) || cid <= 0 || !Array.isArray(order)) return;
+export function persistCurrencyDisplayOrder(orderKey, order) {
+  const key = currencyOrderStorageSuffix(orderKey);
+  if (!key || !Array.isArray(order)) return;
   try {
     localStorage.setItem(
-      `${CURRENCY_DISPLAY_ORDER_LS_PREFIX}${cid}`,
+      `${CURRENCY_DISPLAY_ORDER_LS_PREFIX}${key}`,
       JSON.stringify(order.map((c) => String(c).trim().toUpperCase())),
     );
   } catch {

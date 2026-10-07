@@ -174,11 +174,33 @@ PY
 | `6f1c39f5e7` | 提交后汇率被清空 | `AddTransactionSheet.jsx` 的 `resetForm` 不再清 `rateExchangeRateRaw`（sheet 由 `open` 控制、组件不卸载，状态会保留） |
 | `b59f77174f` | contra 拒结用 `window.confirm` | `ContraInboxSheet.jsx` 改为应用内确认面板（复用现有类，不加 CSS）：点 Reject → 面板出来、列表收起 → 确认才 `onReject(id)`；两个 hook 都放在 `if (!open) return null` **之前**，避免 hooks 顺序错误；关闭 sheet 时清掉待确认状态 |
 
-### 已核实但尚未修（1）——下一批
+### 第三轮：纯 Group 台账的币种顺序键（本轮，桌面 `5b0455a06e` 的前端部分）
 
-| 桌面提交 | 内容 | 为什么缓一步 |
+桌面那个提交很大（PHP + 多页），拆开看电话版实际需要什么：
+
+| 部分 | 处理 |
+|---|---|
+| `api/**`（`user_currency_order_api.php`、`get_accounts_api.php`、`submit_api.php`、reports 等） | **无需移植**：后端两端共用，桌面改了电话版直接受益 |
+| `datacapture` / `processlist` / `bankprocesslist` | 电话版无这些页 → N/A |
+| `AuthenticatedLayout` 侧栏分类图标 | 桌面专属（电话版无该侧栏流程入口）→ N/A |
+| `transactionScope` / `transactionPaymentLogic` / `currencyDisplayOrder` / `transactionApi` | **真缺口，已镜像**（见下） |
+| report 页 `reportScope` / `reportGcBoot` / `useReportGroupCompanyFilter` | 已由 `36495fb2fc` 覆盖（电话版已改完） |
+
+镜像内容：`lib/mobileTransactionScope.js` 的 `resolveTransactionCurrencyOrderCompanyId` 对 `mode === "group"` 返回 null（纯 Group 台账不再拿组内公司当锚），新增 `resolveTransactionCurrencyOrderParams()`；`lib/transactionPaymentLogic.js` 的 `orderCurrencyRows()` 第三参由「公司 id」改为「顺序键」（数字或 `g:GROUP`，并可从 API 响应的 `group_id` 推导）；`lib/currencyOrder.js` 新增 `currencyOrderStorageSuffix()`（与桌面同款：数字或 `g:GROUP`，**统一大写**，所以桌面与电话版同源共用同一把 localStorage 键）；`lib/transactionApi.js` 的 `getUserCurrencyOrder` / `saveUserCurrencyOrder` 支持 `groupId`；`hooks/useMobileTransaction.js` 改为传 `orderParams` + 顺序键。
+
+验证（harness，真模块 + localStorage + fetch stub）：纯 Group → `{companyId:null, groupId:"AP"}` 且不再回退到组内公司；company / aggregate 两种 mode 各自不变；API 回 `group_id` 时用 `g:AP` 顺序；`G:AP` 的本地顺序生效（数字键回归不变）；GET 分别带 `group_id=AP` / `company_id=301`；POST body 带 `group_id`。
+
+> 备注：电话版的 `persistCurrencyDisplayOrder` / `saveUserCurrencyOrder`（两份）目前**无调用方**，所以只改了仍被调用的 `readCurrencyDisplayOrder` / `resolveSavedCurrencyOrder` / `getUserCurrencyOrder`；未使用的函数保留原样（未使用的代码不动）。
+
+### 新发现的小缺口（已记录，未修）
+
+| 来源 | 内容 | 状态 |
 |---|---|---|
-| `5b0455a06e` | group tenant：currency order 缺 group 维度 + 空 group 启动早退 | 涉及 `transactionApi.js` 加 `group_id` 参数与缓存键改 `g:<id>`，影响面较大 |
+| `464c42ab62` | 桌面 report 的币种顺序键在「组台账 + 无公司」时用 `g:GROUP`（`reportCurrencyOrderKey`），电话版 `pages/report/ReportSheets.jsx` 则回退到组内锚定公司 id | 仅影响币种 pill 顺序的来源（不是数据）；且电话版报告多为子公司口径（`36495fb2fc` 的回退），故优先级低 |
+
+### 已核实但尚未修
+
+**无** — 第二轮列出的三条（`276125d07f` / `19349a3611` / `5b0455a06e`）已全部修完。下面是第三轮的详情。
 
 > 原先与它同列、缓一步的 `19349a3611` / `276125d07f` 已于本轮修完（见下表）。
 

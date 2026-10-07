@@ -153,10 +153,15 @@ export async function getCompanyCurrencies({
   return safeJson(res);
 }
 
-export async function getUserCurrencyOrder({ companyId, signal } = {}) {
+export async function getUserCurrencyOrder({ companyId, groupId, signal } = {}) {
   const params = new URLSearchParams({ _t: String(Date.now()) });
   const cid = companyId != null && companyId !== "" ? Number(companyId) : 0;
   if (Number.isFinite(cid) && cid > 0) params.set("company_id", String(cid));
+  else {
+    // Pure Group ledger: the order is stored per group (desktop 5b0455a06e).
+    const gid = groupId != null ? String(groupId).trim().toUpperCase() : "";
+    if (gid) params.set("group_id", gid);
+  }
   const res = await fetch(
     buildApiUrl(`api/transactions/user_currency_order_api.php?${params.toString()}`),
     { credentials: "include", signal },
@@ -165,12 +170,15 @@ export async function getUserCurrencyOrder({ companyId, signal } = {}) {
 }
 
 /** Same contract as legacy JS: POST JSON `{ order: string[] }` (see api/transactions/user_currency_order_api.php). */
-export async function saveUserCurrencyOrder(order, { companyId } = {}) {
+export async function saveUserCurrencyOrder(order, { companyId, groupId } = {}) {
   const codes = Array.isArray(order) ? order.map((c) => String(c || "").trim()).filter(Boolean) : [];
   const body = { order: codes };
   const cid = companyId != null && companyId !== "" ? Number(companyId) : 0;
   if (Number.isFinite(cid) && cid > 0) {
     body.company_id = cid;
+  } else {
+    const gid = groupId != null ? String(groupId).trim().toUpperCase() : "";
+    if (gid) body.group_id = gid;
   }
   const res = await fetch(buildApiUrl("api/transactions/user_currency_order_api.php"), {
     method: "POST",

@@ -22,6 +22,7 @@ import {
   transactionScopeApiParams,
   transactionScopeIsReady,
   resolveTransactionCurrencyOrderCompanyId,
+  resolveTransactionCurrencyOrderParams,
 } from "../lib/mobileTransactionScope.js";
 import {
   applyOptimisticSubmitBalancePatch,
@@ -461,13 +462,20 @@ export function useMobileTransaction({ listPaused = false } = {}) {
   const loadAccountsAndCurrencies = useCallback(
     async (signal) => {
       if (!scopeReady) return;
-      const orderCid = resolveTransactionCurrencyOrderCompanyId(transactionScope, companies);
+      const orderParams = resolveTransactionCurrencyOrderParams(transactionScope, companies);
+      /* Desktop 5b0455a06e: order key is a company id, or `g:GROUP` for a pure Group ledger. */
+      const orderKey =
+        Number(orderParams.companyId) > 0
+          ? Number(orderParams.companyId)
+          : orderParams.groupId
+            ? `g:${orderParams.groupId}`
+            : null;
       try {
         const [accRes, curRes, ordRes] = await Promise.all([
           getAccounts({ ...scopeApi, status: "active", signal }),
           getCompanyCurrencies({ ...scopeApi, signal }),
-          orderCid
-            ? getUserCurrencyOrder({ companyId: orderCid, signal }).catch(() => null)
+          orderKey
+            ? getUserCurrencyOrder({ ...orderParams, signal }).catch(() => null)
             : Promise.resolve(null),
         ]);
         if (signal?.aborted) return;
@@ -484,7 +492,7 @@ export function useMobileTransaction({ listPaused = false } = {}) {
         );
 
         const curRows = Array.isArray(curRes?.data) ? curRes.data : [];
-        const ordered = orderCurrencyRows(curRows, ordRes, orderCid);
+        const ordered = orderCurrencyRows(curRows, ordRes, orderKey);
         const codes = ordered
           .map((r) => String(r.code || r.currency || "").trim().toUpperCase())
           .filter(Boolean);
