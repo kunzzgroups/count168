@@ -9,6 +9,7 @@ import {
   subscribeMaintenanceModeEvent,
 } from "../../utils/maintenance/maintenanceRealtimeBus.js";
 import { useExpirationReminder } from "../../hooks/useExpirationReminder.js";
+import { useAnnouncementUnread } from "../../hooks/useAnnouncementUnread.js";
 import { clearDashboardFilterSession, clearOwnerCompaniesCache } from "../../utils/company/sharedCompanyFilter.js";
 import { spaPath } from "../../utils/routing/pageRoutes.js";
 
@@ -240,6 +241,9 @@ export function useMemberPageShell({ navigate, initSession, todayDmy, lang }) {
   const roleLabel = useMemo(() => formatMemberRole(lang, me?.role), [lang, me?.role]);
 
   const expirationReminder = useExpirationReminder(me, lang);
+  /** 会员自助壳没挂 AppRealtimeBridge，用轮询兜底（页面隐藏时 hook 内部跳过）。 */
+  const { unreadCount: announcementUnreadCount, markRead: markAnnouncementsRead } =
+    useAnnouncementUnread(me, 60000);
   const displayAnnouncements = useMemo(
     () => expirationReminder.mergeAnnouncements(announcements),
     [announcements, expirationReminder.mergeAnnouncements],
@@ -253,6 +257,8 @@ export function useMemberPageShell({ navigate, initSession, todayDmy, lang }) {
     expirationReminder.onBellOpen();
     setShowNotifications(true);
     setAnnouncementsLoading(true);
+    // 徽标清空写在后端（按账号），不依赖列表返回。
+    markAnnouncementsRead();
     try {
       const res = await fetch(buildApiUrl("api/announcements/announcement_get_dashboard_api.php"), {
         credentials: "include",
@@ -264,7 +270,7 @@ export function useMemberPageShell({ navigate, initSession, todayDmy, lang }) {
     } finally {
       setAnnouncementsLoading(false);
     }
-  }, [showNotifications, expirationReminder.onBellOpen]);
+  }, [showNotifications, expirationReminder.onBellOpen, markAnnouncementsRead]);
 
   const performLogout = useCallback(async () => {
     if (logoutLoading) return;
@@ -314,6 +320,7 @@ export function useMemberPageShell({ navigate, initSession, todayDmy, lang }) {
     toggleNotifications: toggleNotificationsWithExpiration,
     announcements: displayAnnouncements,
     announcementsLoading,
+    announcementUnreadCount,
     showLogoutConfirm,
     setShowLogoutConfirm,
     logoutLoading,

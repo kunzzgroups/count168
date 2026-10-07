@@ -136,6 +136,7 @@ export default function MemberPage() {
     toggleNotifications,
     announcements,
     announcementsLoading,
+    announcementUnreadCount,
     showLogoutConfirm,
     setShowLogoutConfirm,
     logoutLoading,
@@ -431,7 +432,7 @@ export default function MemberPage() {
               </SidebarMenuTooltip>
             )}
             <img src={assetUrl("images/count_whitelogo.png")} alt="EAZYCOUNT Logo" className="header-logo" />
-            <div className={`notification-bell${expirationReminder.hasBellBadge ? " has-unread" : ""}`} title={t("notifications")} onClick={toggleNotifications}>
+            <div className={`notification-bell${expirationReminder.hasBellBadge || announcementUnreadCount > 0 ? " has-unread" : ""}`} title={t("notifications")} onClick={toggleNotifications}>
               <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                 <path d="M12 2C10.34 2 9 3.34 9 5V5.29C6.72 6.15 5.12 8.39 5.01 11L5 11V16L3 18V19H21V18L19 16V11C18.88 8.39 17.28 6.15 15 5.29V5C15 3.34 13.66 2 12 2ZM12 22C10.9 22 10 21.1 10 20H14C14 21.1 13.1 22 12 22Z" />
               </svg>

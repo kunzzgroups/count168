@@ -23,11 +23,7 @@ import {
   syncAutoRenewPendingCount,
 } from "../utils/autoRenew/autoRenewPendingSync.js";
 import { useExpirationReminder } from "../hooks/useExpirationReminder.js";
-import {
-  announcementSeenOwnerKey,
-  readAnnouncementSeen,
-  saveAnnouncementSeen,
-} from "../lib/announcementSeenStore.js";
+import { useAnnouncementUnread } from "../hooks/useAnnouncementUnread.js";
 import { REALTIME_DOMAINS } from "../lib/realtime/realtimeEvents.js";
 import { useRealtimeDomain } from "../lib/realtime/useRealtimeDomain.js";
 import { applyLoginLang } from "../utils/i18n/useLoginLang.js";
@@ -278,46 +274,10 @@ export default function AuthenticatedLayout() {
   const [announcementsLoading, setAnnouncementsLoading] = useState(false);
   const [readAnnouncements, setReadAnnouncements] = useState(new Set());
 
-  /** Bell badge (announcements) = announcement ids not yet seen this day.
-      Seen ids persist in localStorage keyed "<user>:<day>" so the badge
-      reappears on the next day / different user, and clears once the
-      panel is opened (see markAnnouncementsSeen below). */
-  const [seenAnnouncementIds, setSeenAnnouncementIds] = useState(() => new Set());
-  const seenAnnouncementIdsRef = useRef(new Set());
-  const announcementSeenOwnerKeyRef = useRef("");
-
-  useEffect(() => {
-    const ownerKey = me ? announcementSeenOwnerKey(me.user_id ?? me.id) : "";
-    announcementSeenOwnerKeyRef.current = ownerKey;
-    if (!ownerKey) {
-      seenAnnouncementIdsRef.current = new Set();
-      setSeenAnnouncementIds(seenAnnouncementIdsRef.current);
-      return;
-    }
-    const stored = readAnnouncementSeen();
-    seenAnnouncementIdsRef.current =
-      stored.ownerKey === ownerKey ? new Set(stored.ids) : new Set();
-    setSeenAnnouncementIds(seenAnnouncementIdsRef.current);
-  }, [me]);
-
-  const markAnnouncementsSeen = useCallback((rows) => {
-    if (!rows?.length) return;
-    const ownerKey = announcementSeenOwnerKeyRef.current;
-    if (!ownerKey) return;
-    const next = new Set(seenAnnouncementIdsRef.current);
-    let changed = false;
-    rows.forEach((row) => {
-      const id = Number(row?.id);
-      if (!Number.isNaN(id) && !next.has(id)) {
-        next.add(id);
-        changed = true;
-      }
-    });
-    if (!changed) return;
-    seenAnnouncementIdsRef.current = next;
-    setSeenAnnouncementIds(next);
-    saveAnnouncementSeen(ownerKey, next);
-  }, []);
+  /** Bell badge (announcements) = per login account, stored and counted by the
+      backend (announcement_read_state). Realtime + markRead live in the hook. */
+  const { unreadCount: unreadAnnouncementCount, markRead: markAnnouncementsRead } =
+    useAnnouncementUnread(me);
 
   const fetchAnnouncementsList = useCallback(async () => {
     try {
@@ -352,11 +312,6 @@ export default function AuthenticatedLayout() {
       });
     },
     { enabled: Boolean(me) },
-  );
-
-  const unreadAnnouncementCount = useMemo(
-    () => announcements.filter((row) => !seenAnnouncementIds.has(Number(row?.id))).length,
-    [announcements, seenAnnouncementIds],
   );
 
   // --- Avatar Selector State ---
@@ -474,6 +429,13 @@ export default function AuthenticatedLayout() {
       );
     };
   }, [location.pathname]);
+
+  /* 进入公告页也算已读（后端只记得 last_read_at，一次全量）。 */
+  useEffect(() => {
+    if (me?.user_id && pathnameIs("announcement", location.pathname)) {
+      markAnnouncementsRead();
+    }
+  }, [me?.user_id, location.pathname, markAnnouncementsRead]);
 
   /* Transaction Payment / Dashboard：layout 阶段挂 transaction-page，避免 lazy chunk 加载前样式错位 */
   useLayoutEffect(() => {
@@ -1288,8 +1250,8 @@ export default function AuthenticatedLayout() {
         const json = await res.json();
         if (json.success && json.data) {
           setAnnouncements(json.data);
-          // Panel is in view: treat anything that arrives now as seen.
-          markAnnouncementsSeen(json.data);
+          // Panel is in view: treat anything that arrives now as read.
+          markAnnouncementsRead();
         } else {
           setAnnouncements([]);
         }
