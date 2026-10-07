@@ -402,6 +402,13 @@ test("已登录时不得弹 passkey（实机：直接进 App 但弹了 passkey�
   );
 });
 
+test("iOS 诊断必须报 standalone（独立 App 里 passkey 可能不可用）", () => {
+  const page = src("pages", "more", "SettingsPage.jsx");
+  assert.match(page, /standalone=\$\{isStandaloneWebApp\(\) \? 1 : 0\}/, "诊断行没有 standalone 标志");
+  // 之前写了文案却从未渲染，等于没有 ✗ —— 现在必须真的渲染出来
+  assert.match(page, /bioUnsupportedStandaloneHint/, "standalone 提示文案又变成死文案了");
+});
+
 /* ── 运行 ─────────────────────────────────────────────────────────── */
 
 let failed = 0;

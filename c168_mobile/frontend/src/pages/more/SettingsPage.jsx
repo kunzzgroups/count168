@@ -36,6 +36,7 @@ import {
 import { registerDeviceToken, revokeDeviceToken } from "../../lib/deviceTokenApi.js";
 import {
   createPasskey,
+  isStandaloneWebApp,
   listPasskeys,
   passkeyErrorMessage,
   removeAllPasskeys,
@@ -90,7 +91,7 @@ export default function SettingsPage() {
    *
    * 初始值故意非空：如果连这一行都不显示，那就不是探测失败而是**包没更新**。
    */
-  const BIO_BUILD = "b26";
+  const BIO_BUILD = "b27";
   const [bioDiag, setBioDiag] = useState("boot");
   const i18n = useMemo(() => MORE_I18N[lang] || MORE_I18N.en, [lang]);
 
@@ -203,7 +204,10 @@ export default function SettingsPage() {
       enabled: count > 0,
       label: "",
       count,
-      note: `wk=${supported ? 1 : 0} count=${count}`,
+      // standalone = 从 iOS 「添加到主屏幕」启动的独立 App。
+      // 为何要报：部分 iOS 版本在独立 App 里不给 passkey ✗（而本产品正是这样分发的），
+      // 而这一位数字就能把“用不了”直接分成两种完全不同的原因。
+      note: `wk=${supported ? 1 : 0} count=${count} standalone=${isStandaloneWebApp() ? 1 : 0}`,
     };
   }, []);
 
@@ -504,6 +508,11 @@ export default function SettingsPage() {
             {/* 当前用不了时，给一句用户能行动的话（不是报错，是状态） */}
             {bioReasonText ? (
               <p className="m-more-settings-hint">{bioReasonText}</p>
+            ) : null}
+
+            {/* 独立 App 里 passkey 常常不可用 —— 失败时给出可行动的提示 */}
+            {bioError && isStandaloneWebApp() ? (
+              <p className="m-more-settings-hint">{i18n.bioUnsupportedStandaloneHint}</p>
             ) : null}
 
             {/* 只在真的出错时提示一行 */}
