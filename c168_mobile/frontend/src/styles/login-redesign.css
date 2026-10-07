@@ -59,7 +59,8 @@ body.bg {
   height: clamp(48px, calc(12dvh - 24px), 76px);
   margin: 0 auto clamp(8px, 1.6dvh, 14px);
   transform: rotate(-45deg);
-  filter: drop-shadow(0 10px 14px rgba(20, 90, 200, 0.35));
+  /* 设计稿在这里给 logo 加了 filter: drop-shadow(0 10px 14px rgba(20,90,200,.35))，
+     客户要求去掉（阴影会影响整体观感）—— 需要时可以加回来 */
 }
 
 .sc-login-brand-logo img {
