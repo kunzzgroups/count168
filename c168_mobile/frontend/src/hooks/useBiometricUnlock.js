@@ -22,6 +22,7 @@ import {
   withTimeout,
 } from "../lib/biometricStore.js";
 import {
+  CAP,
   METHOD,
   autoSwitchTarget,
   capabilityFromProbe,
@@ -80,6 +81,11 @@ export function useBiometricUnlock() {
   // { kind, code, message } —— message 优先展示（服务端可能给了具体原因，例如维护公告）
   const [failure, setFailure] = useState(null);
   const [attempts, setAttempts] = useState(0);
+  /**
+   * 预校正时探测到的设备能力状态。暴露给界面，用来决定**该不该**给
+   * 「改用另一种方式」的按钮 —— 一个都没有时给按钮就是死循环。
+   */
+  const [capabilityState, setCapabilityState] = useState(CAP.UNKNOWN);
 
   // StrictMode 下 effect 会跑两次，用它避免连续弹两次指纹
   const attemptGuard = useRef(false);
@@ -170,6 +176,7 @@ export function useBiometricUnlock() {
     try {
       const settings = ensureSettings(Boolean(await withTimeout(loadToken(), 4000)));
       const cap = capabilityFromProbe(await biometryInfo(1500));
+      setCapabilityState(cap.state);
       const target = autoSwitchTarget(settings.method, cap);
       if (target) {
         // 显式写入：自动切换是产品要求，但**仍然一次性写完整模型**
@@ -225,5 +232,5 @@ export function useBiometricUnlock() {
     void preflightThenUnlock();
   }, [state, preflightThenUnlock]);
 
-  return { state, busy, failure, attempts, unlock, usePasswordInstead };
+  return { state, busy, failure, attempts, capabilityState, unlock, usePasswordInstead };
 }

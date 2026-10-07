@@ -17,6 +17,7 @@ import {
   CAP,
   METHOD,
   autoSwitchTarget,
+  canOfferMethodSwitch,
   capabilityFromProbe,
   disabledSettings,
   migrateSettings,
@@ -180,7 +181,9 @@ test("用例8：锁屏里提到「指纹」的文案必须是方法专属的", (
     .filter(([, line]) => /指纹/.test(line))
     // 方法专属的键名（methodGoneFingerprint / switchToFingerprint）允许点名指纹，
     // 它们只在用户真的选了指纹时才会渲染
-    .filter(([, line]) => !/Fingerprint/.test(line));
+    .filter(([, line]) => !/Fingerprint/.test(line))
+    // 中性表述（同时点名指纹与人脸）也是允许的 —— 只点名一种才是“声称”
+    .filter(([, line]) => !/人脸/.test(line));
   assert.deepEqual(
     offenders,
     [],
@@ -342,6 +345,22 @@ test("引导只在两个入口共用一个实现（不得再各自写一份）",
     /registerDeviceToken\(/.test(login),
     false,
     "LoginPage 又自己调了 registerDeviceToken —— 启用逻辑应只在共用模块里",
+  );
+});
+
+test("设备什么都没有时**不给**「改用另一种」按钮（否则是死循环）", () => {
+  const none = capabilityFromProbe({ ok: true, isAvailable: false, strongAvailable: false });
+  assert.equal(none.state, CAP.NOT_ENROLLED);
+  assert.equal(canOfferMethodSwitch(none), false, "会陷入 指纹→人脸→指纹 的死循环");
+});
+
+test("其他情况仍然给按钮（未知时让用户自己决定）", () => {
+  assert.equal(canOfferMethodSwitch({ state: CAP.UNKNOWN }), true);
+  assert.equal(canOfferMethodSwitch(null), true);
+  assert.equal(canOfferMethodSwitch({ state: CAP.TEMPORARILY_LOCKED }), true);
+  assert.equal(
+    canOfferMethodSwitch(capabilityFromProbe({ ok: true, isAvailable: true, strongAvailable: false })),
+    true,
   );
 });
 

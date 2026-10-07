@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
 import { readLoginLang } from "../../lib/loginLang.js";
-import { METHOD, ensureSettings, saveSettings } from "../../lib/biometricSettings.js";
+import {
+  CAP,
+  METHOD,
+  canOfferMethodSwitch,
+  ensureSettings,
+  saveSettings,
+} from "../../lib/biometricSettings.js";
 import { loadToken } from "../../lib/biometricStore.js";
 import {
   FAIL_BIOMETRIC,
@@ -49,6 +55,7 @@ const TEXT = {
     // 用户选的那种方式在这台设备上没了（在系统里删了指纹等）
     methodGoneFingerprint: "这台设备上已经没有可用的指纹了（可能在系统设置里被删掉）。",
     methodGoneFace: "这台设备上已经没有可用的人脸识别了。",
+    nothingEnrolled: "这台手机还没有录入任何可供 App 使用的指纹或人脸，请先在系统设置里添加一个。",
     switchToFace: "改用人脸",
     switchToFingerprint: "改用指纹",
     tooMany: "多次未能识别。可以直接用密码登录。",
@@ -78,6 +85,8 @@ const TEXT = {
     bioFailed: "Not recognised. Please try again.",
     methodGoneFingerprint: "Fingerprint is no longer set up on this device.",
     methodGoneFace: "Face recognition is no longer set up on this device.",
+    nothingEnrolled:
+      "No fingerprint or face is set up for apps on this phone. Add one in your phone's settings first.",
     switchToFace: "Use face instead",
     switchToFingerprint: "Use fingerprint instead",
     tooMany: "Several attempts failed. You can sign in with your password instead.",
@@ -107,7 +116,8 @@ const TEXT = {
  * 只有 unlocked / disabled 才渲染 children。
  */
 export default function BiometricLockGate({ children }) {
-  const { state, busy, failure, attempts, unlock, usePasswordInstead } = useBiometricUnlock();
+  const { state, busy, failure, attempts, capabilityState, unlock, usePasswordInstead } =
+    useBiometricUnlock();
   const [lang, setLang] = useState(() => readLoginLang());
   /**
    * 用户选的解锁方式。**只用来决定图标**，不用来决定流程 ——
@@ -166,7 +176,16 @@ export default function BiometricLockGate({ children }) {
   // 这里只保留**手动回退** —— 当自动换不了（探测没给出明确答案）时，
   // 用户仍然有路可走，但要不要换由他决定。
   const otherMethod = method === METHOD.FINGERPRINT ? METHOD.FACE : METHOD.FINGERPRINT;
-  const offerSwitch = Boolean(failure) && methodUnavailable(failure.code);
+  const needsSwitch = Boolean(failure) && methodUnavailable(failure.code);
+  const offerSwitch = needsSwitch && canOfferMethodSwitch(capabilityState);
+  /**
+   * 两种方式都没有 → **不给任何切换按钮**，只说一件事 + 一个出口。
+   *
+   * 为何：实机截图拍到了死循环 —— “指纹已不可用” → [改用人脸] →
+   * “人脸已不可用” → [改用指纹] → …，用户永远出不去。
+   * 而真正该说的是“这台手机还没录入任何生物识别”。
+   */
+  const nothingEnrolled = needsSwitch && capabilityState === CAP.NOT_ENROLLED;
 
   const switchMethod = (target) => {
     saveSettings({ enabled: true, method: target });
@@ -217,7 +236,12 @@ export default function BiometricLockGate({ children }) {
               </p>
             ) : null}
 
-            {offerSwitch ? (
+            {/* 两种都没有：只说“去系统设置里添加”，并**只给密码一个出口** */}
+            {nothingEnrolled ? <p className="bio-lock__hint">{t.nothingEnrolled}</p> : null}
+
+            {nothingEnrolled ? (
+              <>{passwordButton(true)}</>
+            ) : offerSwitch ? (
               <>
                 {switchButton(true)}
                 {passwordButton(false)}

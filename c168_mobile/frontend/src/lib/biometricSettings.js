@@ -241,6 +241,21 @@ export function autoSwitchTarget(method, capability) {
   return available ? other : "";
 }
 
+/**
+ * 失败后要不要把「改用另一种方式」推给用户。
+ *
+ * ⚠️ **设备什么都没有时绝对不能给**（NOT_ENROLLED）：
+ * 否则会变成死循环 —— 实机截图拍到的就是：
+ *   “指纹已不可用” → [改用人脸] → “人脸已不可用” → [改用指纹] → …
+ * 用户永远出不去，而真正该说的是“这台手机还没录入任何生物识别”。
+ *
+ * NOT_ENROLLED 之外（包括 UNKNOWN）仍然给按钮：
+ * 未知时让用户自己决定，比替他决定安全，而且那种情况下至少有一种可能真的能用。
+ */
+export function canOfferMethodSwitch(capability) {
+  return (capability?.state || CAP.UNKNOWN) !== CAP.NOT_ENROLLED;
+}
+
 /* ── 持久化（唯一碰 localStorage 的地方）────────────────────────────── */
 
 export function loadSettings() {
