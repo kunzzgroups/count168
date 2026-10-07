@@ -233,6 +233,17 @@ export default function LoginPage() {
     sessionStorage.removeItem(LOGIN_ASSET_RETRY_KEY);
   }, []);
 
+  /**
+   * 会话检查已完成且**未登录**；在此之前不许碰 passkey。
+   *
+   * ⚠️ 为何必须有它：路由没有守卫，打开 App 会先落到 /login。
+   * 而下面那个 passkey 效果在挂载时立刻调 get() —— 于是**已登录的用户**
+   * 也会先被弹一次系统 passkey 界面，然后才被会话检查跳进 App。
+   * 实机反馈就是「直接进 App，但会跳出 passkey 弹窗」。
+   * 两个效果当初是并行跑的，这就是个竞态。
+   */
+  const [passkeyMayRun, setPasskeyMayRun] = useState(false);
+
   useEffect(() => {
     let cancelled = false;
     const controller = new AbortController();
@@ -244,7 +255,13 @@ export default function LoginPage() {
           signal: controller.signal,
         });
         const json = await res.json();
-        if (cancelled || !res.ok || !json?.success || !json?.data) return;
+        if (cancelled) return;
+
+        if (!res.ok || !json?.success || !json?.data) {
+          // 确实没登录 → 这时才允许走 passkey 自动登录
+          setPasskeyMayRun(true);
+          return;
+        }
 
         const user = json.data;
         const userType = String(user.user_type || "").toLowerCase();
@@ -262,7 +279,11 @@ export default function LoginPage() {
         }
         navigate(resolveMobileLandingPath(user), { replace: true });
       } catch (err) {
-        if (err?.name === "AbortError") return;
+        if (err?.name !== "AbortError") {
+          // 会话检查本身失败（网络等）→ 不能因此彻底禁用 passkey 自动登录，
+          // 否则用户永远只能手输密码。放行，让 passkey 流程自己去试。
+          setPasskeyMayRun(true);
+        }
       }
     })();
     return () => {
@@ -328,6 +349,9 @@ export default function LoginPage() {
   useEffect(() => {
     if (isNative()) return undefined;        // APK 走启动门禁，这里不做
 
+    // 已登录就绝不碰 passkey（否则会先弹一次系统界面再被跳进 App）
+    if (!passkeyMayRun) return undefined;
+
     // 仅在**本机注册过** passkey 时动作。
     //
     // 为何不再要求“必须知道凭据 ID”：已用 authenticatorAttachment: "platform"
@@ -375,7 +399,7 @@ export default function LoginPage() {
       cancelled = true;
       ac.abort();
     };
-  }, [finishLogin, i18n.bioFailed, lang, showNotice]);
+  }, [finishLogin, i18n.bioFailed, lang, passkeyMayRun, showNotice]);
 
   useEffect(() => {
     const ac = new AbortController();

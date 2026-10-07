@@ -385,6 +385,23 @@ test("设置页必须把 passkey 结果写回模型（不得只看服务端计�
   assert.match(page, /method: METHOD\.PASSKEY/, "设置页没有把 passkey 写进模型");
 });
 
+test("已登录时不得弹 passkey（实机：直接进 App 但弹了 passkey）", () => {
+  const page = src("pages", "login", "LoginPage.jsx");
+  // 登录页的 passkey 效果必须等会话检查确认“未登录”才能跑，
+  // 否则已登录用户也会先被弹一次系统 passkey 界面。
+  assert.match(page, /passkeyMayRun/, "登录页没有“会话未登录”的门禁");
+  assert.match(
+    page,
+    /if \(!passkeyMayRun\) return undefined;/,
+    "passkey 效果没有守在 passkeyMayRun 之后",
+  );
+  assert.match(
+    page,
+    /lang, passkeyMayRun, showNotice\]/,
+    "passkeyMayRun 不在依赖数组里 —— 会话检查完成后效果不会重跑",
+  );
+});
+
 /* ── 运行 ─────────────────────────────────────────────────────────── */
 
 let failed = 0;
