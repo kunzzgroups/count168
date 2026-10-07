@@ -17,7 +17,6 @@ import {
   toNumberLike,
   computeRateMiddlemanProfit,
   parseMiddlemanRateInput,
-  parsePositiveAmt,
 } from "../../lib/transactionSubmitHelpers.js";
 import { formatYmd, parseYmd, formatDisplayDate } from "../../lib/dashboardDateUtils.js";
 import "./add-transaction-sheet.css";
@@ -476,8 +475,9 @@ export default function AddTransactionSheet({
     }
     setRateMiddlemanAmount(middleStr);
 
-    // Desktop: customer preview = gross − Service Fee only (Rate-Mul / PT do not change form amount).
-    const toAmountDeductionDec = parsePositiveAmt(rateMiddlemanInputAmount);
+    // Desktop parity: to preview = gross − Middle-Man Amount (finalFeeDec, i.e. Rate-Mul + Fee —
+    // both are deducted when both are filled in).
+    const toAmountDeductionDec = finalFeeDec;
 
     try {
       const fromDec = MoneyDecimal.toDecimal(clean(rateCurrencyFromAmount) || "0", 0);
@@ -795,14 +795,11 @@ export default function AddTransactionSheet({
                   title={m.reverseAccounts}
                   aria-label={m.reverseAccounts}
                   onClick={() => {
+                    // Desktop parity: accounts-reverse swaps the accounts only. Desktop removed the
+                    // amount/gross flip from this very button (c74e21dc84) — reversing the accounts
+                    // must not silently reverse the money.
                     setRateToAccount(rateFromAccount);
                     setRateFromAccount(rateToAccount);
-                    const tmpAmt = rateCurrencyFromAmount;
-                    setRateCurrencyFromAmount(rateCurrencyToAmount);
-                    setRateCurrencyToAmount(tmpAmt);
-                    const tmpGrossTo = rateToAmountGrossStr;
-                    setRateToAmountGrossStr(rateFromAmountGrossStr);
-                    setRateFromAmountGrossStr(tmpGrossTo);
                   }}
                   className="m-tx-form-btn m-tx-form-btn--outline tap-scale"
                 >

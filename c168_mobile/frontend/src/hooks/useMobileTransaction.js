@@ -6,6 +6,7 @@ import {
   periodPresetRange,
   todayYmd,
 } from "../lib/dashboardDateUtils.js";
+import { parseDdMmYyyyToYmd } from "../lib/dateUtils.js";
 import {
   companiesForPicker as resolveCompaniesForPicker,
   pickCompany,
@@ -75,6 +76,17 @@ const COMPANIES_API = "api/transactions/get_owner_companies_api.php";
 function isManagerOrAbove(me) {
   const role = String(me?.role || "").trim().toLowerCase();
   return role === "manager" || role === "admin" || role === "owner";
+}
+
+/** Desktop parity: after a submit, anchor the Capture Date range at "today" — a past tx date
+ *  extends the range forward to today, a future one extends it backward. YMD strings compare
+ *  lexicographically, so no date parsing is needed here. */
+function resolveSubmitFocusRangeYmd(txYmd, todayYmdStr) {
+  const tx = String(txYmd || "").trim();
+  const today = String(todayYmdStr || "").trim();
+  if (!tx) return { from: today, to: today };
+  if (!today || tx === today) return { from: tx, to: tx };
+  return tx < today ? { from: tx, to: today } : { from: today, to: tx };
 }
 
 export function useMobileTransaction({ listPaused = false } = {}) {
@@ -1118,7 +1130,11 @@ export function useMobileTransaction({ listPaused = false } = {}) {
       const ids = [...new Set((accountIds || []).map((id) => Number(id)).filter((id) => id > 0))];
       if (ids.length === 0) return;
 
-      const txDate = String(transactionDate || "").trim();
+      /* The sheet hands over DMY (formatDmy) while the search state is YMD — normalise to YMD,
+         otherwise the range lands in the wrong format and never matches captureRangeKey. */
+      const rawTxDate = String(transactionDate || "").trim();
+      const txDate = /^\d{2}\/\d{2}\/\d{4}$/.test(rawTxDate) ? parseDdMmYyyyToYmd(rawTxDate) : rawTxDate;
+      const focusRange = resolveSubmitFocusRangeYmd(txDate, todayYmd());
       const currencyCodes = [
         ...new Set(
           (Array.isArray(submitCurrency) ? submitCurrency : [submitCurrency])
@@ -1144,8 +1160,8 @@ export function useMobileTransaction({ listPaused = false } = {}) {
       }
 
       if (txDate) {
-        setDateFrom(txDate);
-        setDateTo(txDate);
+        setDateFrom(focusRange.from);
+        setDateTo(focusRange.to);
         setActivePreset("");
       }
       setSelectedCategories([]);
@@ -1160,8 +1176,10 @@ export function useMobileTransaction({ listPaused = false } = {}) {
         setCurrency(currencyCodes[0]);
       }
 
-      const rangeKey = txDate ? `${txDate}|${txDate}` : `${dateFrom}|${dateTo}`;
-      const didJumpCaptureDate = Boolean(txDate && (txDate !== dateFrom || txDate !== dateTo));
+      const rangeKey = txDate ? `${focusRange.from}|${focusRange.to}` : `${dateFrom}|${dateTo}`;
+      const didJumpCaptureDate = Boolean(
+        txDate && (focusRange.from !== dateFrom || focusRange.to !== dateTo),
+      );
       setSubmitFocusByCurrency((prev) => {
         const base = !didJumpCaptureDate && submitFocusRangeKey === rangeKey ? { ...prev } : {};
         const codes = currencyCodes.length ? currencyCodes : [String(currency || "MYR").toUpperCase()];
