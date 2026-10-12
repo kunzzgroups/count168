@@ -45,6 +45,19 @@ export default function KeyboardOwnedInput({
    * on submit and must never be a keystroke behind.
    */
   composeThrottleMs = 0,
+  /**
+   * Force the keyboard to *commit* a composition after the user pauses for this many ms (0 = never).
+   *
+   * Why this exists: with Sogou (and other Chinese IMEs) the text can sit in the **IME's own
+   * composition buffer** — delete presses then edit that buffer instead of the field, so a user has to
+   * press backspace several times before anything visibly deletes. Tapping out of the field and back
+   * in clears the buffer and "fixes" it instantly; this does the same thing without closing the
+   * keyboard: collapsing the selection to the end commits an ongoing composition in Blink.
+   *
+   * Only for fields that never take Chinese text (codes, usernames, passwords, amounts, numeric
+   * searches) — committing mid-composition would break pinyin input in a free-text field.
+   */
+  commitCompositionOnIdleMs = 0,
   /** Optional outer ref (e.g. to focus the field when a panel opens). */
   inputRef: externalRef,
   ...inputProps
@@ -60,6 +73,7 @@ export default function KeyboardOwnedInput({
   /** Trailing flush for a coalesced update, so a pause (no compositionend) still catches up. */
   const flushTimerRef = useRef(0);
   const defer = composeThrottleMs > 0;
+  const commitOnIdle = commitCompositionOnIdleMs > 0;
   /** The last text we published or adopted — compared against, never written back blindly. */
   const lastTextRef = useRef(initialValue);
 
@@ -81,6 +95,35 @@ export default function KeyboardOwnedInput({
       }
     };
 
+    /*
+     * Composition-idle commit (see the prop's comment): while the keyboard holds a composition, wait
+     * for a pause and then hand the text over to the field, so the next delete reaches real text.
+     */
+    let composing = false;
+    let idleTimer = 0;
+    const cancelIdle = () => {
+      if (idleTimer) {
+        window.clearTimeout(idleTimer);
+        idleTimer = 0;
+      }
+    };
+    const commitNow = () => {
+      idleTimer = 0;
+      if (!composing || !commitOnIdle) return;
+      try {
+        const end = el.value.length;
+        el.setSelectionRange(end, end);
+        window.dispatchEvent(new CustomEvent("ec:composition-committed"));
+      } catch {
+        /* some input types can refuse a selection change — nothing to do */
+      }
+    };
+    const scheduleIdleCommit = () => {
+      if (!commitOnIdle || !composing) return;
+      cancelIdle();
+      idleTimer = window.setTimeout(commitNow, commitCompositionOnIdleMs);
+    };
+
     /** Hand the field's current text to the caller (unless it is what we already published). */
     const applyNow = () => {
       cancelFlush();
@@ -91,6 +134,7 @@ export default function KeyboardOwnedInput({
       if (needsText) setText(text);
       if (defer) startTransition(() => onValueChangeRef.current?.(text));
       else onValueChangeRef.current?.(text);
+      scheduleIdleCommit();
     };
 
     const publish = (event) => {
@@ -106,14 +150,27 @@ export default function KeyboardOwnedInput({
       applyNow();
     };
 
+    const onCompositionStart = () => {
+      composing = true;
+    };
+    const onCompositionEnd = () => {
+      composing = false;
+      cancelIdle();
+    };
+
     el.addEventListener("input", publish);
     el.addEventListener("compositionend", publish);
+    el.addEventListener("compositionstart", onCompositionStart);
+    el.addEventListener("compositionend", onCompositionEnd);
     return () => {
       cancelFlush();
+      cancelIdle();
       el.removeEventListener("input", publish);
       el.removeEventListener("compositionend", publish);
+      el.removeEventListener("compositionstart", onCompositionStart);
+      el.removeEventListener("compositionend", onCompositionEnd);
     };
-  }, [needsText, defer, composeThrottleMs]);
+  }, [needsText, defer, composeThrottleMs, commitOnIdle, commitCompositionOnIdleMs]);
 
   useEffect(() => {
     const el = inputRef.current;

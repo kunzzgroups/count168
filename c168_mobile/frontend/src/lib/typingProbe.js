@@ -61,6 +61,8 @@ export function startTypingProbe() {
        */
       valueShrinks: 0,
       composingDeletes: 0,
+      /** Compositions this page handed over to the field (commitCompositionOnIdleMs). */
+      forcedCommits: 0,
       /*
        * And when they arrive: a "press six times, then it deletes" experience where the page receives
        * all six at once means the IME/WebView batched them. `firstInputDelayMs` is keydown -> first
@@ -172,6 +174,15 @@ export function startTypingProbe() {
     },
     true,
   );
+  /* KeyboardOwnedInput reports every composition it hands over to the field (see
+     `commitCompositionOnIdleMs`) — on a device this is how we see the workaround actually firing. */
+  document.addEventListener(
+    "ec:composition-committed",
+    () => {
+      if (current) current.forcedCommits += 1;
+    },
+    true,
+  );
 
   try {
     new PerformanceObserver((list) => {
@@ -244,6 +255,7 @@ export function readTypingReport() {
           beforeInputs: session.beforeInputs,
           valueShrinks: session.valueShrinks,
           composingDeletes: session.composingDeletes,
+          forcedCommits: session.forcedCommits,
           /* Only meaningful when a key press preceded the first event: the harness (and some IMEs)
              can deliver inserts without any keydown at all. */
           firstInputDelayMs:
@@ -292,8 +304,12 @@ export function formatTypingReport(report) {
     /* Did those deletes do anything visible? */
     lines.push(
       `deletes that shortened the field: ${s.valueShrinks} of ${s.deleteInputs}` +
-        (s.composingDeletes ? ` · during IME composition: ${s.composingDeletes}` : ""),
+        (s.composingDeletes ? ` · during IME composition: ${s.composingDeletes}` : "") +
+        (s.forcedCommits ? ` · compositions handed over: ${s.forcedCommits}` : ""),
     );
+    if (s.forcedCommits > 0 && s.valueShrinks === s.deleteInputs && s.deleteInputs > 0) {
+      lines.push("   => the pause-commit workaround is working on this device (deletes hit real text)");
+    }
     if (s.deleteInputs > 0 && s.valueShrinks < s.deleteInputs) {
       lines.push(
         "   => the keyboard kept those characters in its own composition buffer;",

@@ -230,6 +230,48 @@ async function main() {
       liteState,
     );
 
+    /* D-2) the user-discovered workaround, automated: tapping out of a field and back in clears the
+       IME's composition buffer, after which a delete is immediate ("点一下屏幕再点回输入框就能删").
+       So a paused composition must be handed over to the field automatically. */
+    await evalInPage(
+      "window.__forcedCommits = 0; window.addEventListener('ec:composition-committed', () => { window.__forcedCommits += 1; }, true); true",
+    );
+    await evalInPage(`(() => {
+      const el = document.querySelector('#user-id');
+      el.focus();
+      el.value = '';
+      return true;
+    })()`);
+    await send("Input.imeSetComposition", { text: "abc", selectionStart: 3, selectionEnd: 3 });
+    await sleep(1400); /* past the 800ms idle threshold */
+    const forced = await evalInPage(
+      "(() => { const el = document.querySelector('#user-id'); return { count: window.__forcedCommits || 0, value: el ? el.value : null }; })()",
+    );
+    for (const type of ["rawKeyDown", "keyUp"]) {
+      await send("Input.dispatchKeyEvent", {
+        type,
+        key: "Backspace",
+        code: "Backspace",
+        windowsVirtualKeyCode: 8,
+        nativeVirtualKeyCode: 8,
+      });
+    }
+    await sleep(250);
+    const afterForcedDelete = await evalInPage(
+      "(() => { const el = document.querySelector('#user-id'); return el ? el.value : null; })()",
+    );
+    record(
+      "login: a paused IME composition is handed over to the field (delete hits real text)",
+      forced.count >= 1 &&
+        typeof afterForcedDelete === "string" &&
+        afterForcedDelete.length < String(forced.value || "").length,
+      {
+        forcedCommits: forced.count,
+        valueBeforeDelete: forced.value,
+        valueAfterDelete: afterForcedDelete,
+      },
+    );
+
     /* Back to the normal variant for everything below. */
     await send("Page.navigate", { url: withFlag("lite=0") });
     await waitFor(() => evalInPage("!!document.querySelector('#company-id')"), {

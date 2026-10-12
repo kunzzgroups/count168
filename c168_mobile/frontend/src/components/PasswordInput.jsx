@@ -1,6 +1,9 @@
 import { forwardRef, useState } from "react";
 import KeyboardOwnedInput from "./KeyboardOwnedInput.jsx";
 
+/** Idle time after which a paused IME composition is committed — see KeyboardOwnedInput. */
+export const COMPOSITION_COMMIT_MS = 800;
+
 export function PasswordVisibilityIcon({ visible }) {
   return (
     <span className="ec-password-toggle-icon" aria-hidden="true">
@@ -35,6 +38,8 @@ const PasswordInput = forwardRef(function PasswordInput(
     visible: visibleProp,
     onVisibleChange,
     defaultVisible = false,
+    /** Fields that never take Chinese text can hand their composition over to the field on a pause. */
+    commitCompositionOnIdleMs = 0,
     showLabel = "Show password",
     hideLabel = "Hide password",
     className = "",
@@ -71,6 +76,7 @@ const PasswordInput = forwardRef(function PasswordInput(
         className={[className, visible ? "" : "ec-password-masked"].filter(Boolean).join(" ")}
         initialValue={value ?? ""}
         value={value}
+        commitCompositionOnIdleMs={commitCompositionOnIdleMs}
         onValueChange={(text) => onChange?.({ target: { value: text } })}
         disabled={disabled}
         spellCheck={false}

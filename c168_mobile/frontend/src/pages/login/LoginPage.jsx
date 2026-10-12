@@ -11,6 +11,7 @@ import { isNative } from "../../lib/biometricStore.js";
 import { useBiometricEnrol, BiometricEnrolModal } from "../../components/lock/BiometricEnrolModal.jsx";
 import { readLastCompanyId, writeLastCompanyId } from "../../lib/lastLoginPrefs.js";
 import KeyboardOwnedInput from "../../components/KeyboardOwnedInput.jsx";
+import { COMPOSITION_COMMIT_MS } from "../../components/PasswordInput.jsx";
 import { formatTypingReport, readTypingReport, startTypingProbe } from "../../lib/typingProbe.js";
 import { applyLiteMode, isLiteMode, noteTypingReport, setLiteMode } from "../../lib/liteMode.js";
 import { onBrandLogoError } from "../../lib/brandAssets.js";
@@ -106,6 +107,14 @@ function useUppercaseField(initial = "") {
       onValueChange,
       onBlur,
       onFocus,
+      /*
+       * Company id / username are codes: they never hold Chinese text, so if the keyboard keeps a
+       * composition open after the user pauses, hand it to the field. That is the automated version
+       * of the workaround users discovered themselves — "tap out of the box and back in, then delete
+       * works": tapping out clears the IME's composition buffer, and a delete that reaches real text
+       * is immediate. See KeyboardOwnedInput.commitCompositionOnIdleMs.
+       */
+      commitCompositionOnIdleMs: COMPOSITION_COMMIT_MS,
       autoCapitalize: "none",
       autoCorrect: "off",
       spellCheck: false,
@@ -746,6 +755,8 @@ export default function LoginPage() {
                     required
                     autoComplete="current-password"
                     enterKeyHint="go"
+                    /* masked field, never Chinese text: same composition hand-over as the id fields */
+                    commitCompositionOnIdleMs={COMPOSITION_COMMIT_MS}
                     /* no `value` on purpose: typing must not re-render this page (see
                        useUppercaseField); the submit path reads passwordRef */
                     onChange={(e) => {
