@@ -68,6 +68,7 @@ Exit code 0 = all checks pass, 1 = a check failed, 2 = harness error.
 | `open: mounting the picker shows a page of the list, not every account` | opening the picker mounting the whole account list (measured 6.0s freeze at 2000 accounts before the fix) |
 | `ime: list filters while composing` / `typing is not rewritten` / `typing survives the next keystroke` | phone IME / word-mode keyboards being fought by the search field |
 | `ime: text the keyboard typed survives the next render and still filters the list` | the field being **controlled**: Gboard writes the composing text into the DOM out of React's sight, so the next render (any state change) puts its own, older string back — the typed characters vanish, the list keeps filtering on something else, and only a delete (a fresh event) re-aligns them (reported 2026-10 as "typing finds nothing until I delete a character") |
+| `ime: a burst of composition updates stays cheap and still catches up` | a Chinese IME on an old phone (Sogou keeps a composition open): four updates landing in one tick must be coalesced without leaving the list on a stale query — see `docs/mobile-android-ime-input.md` |
 | `reopen: the search field starts empty and the list is not still filtered` | the field being uncontrolled: clearing it is the panel's job, not React's |
 | `delete: list re-expands to the full match set` | filtering correctness after the windowed rendering |
 | `delete: max frame gap …` | the reported "delete freezes for seconds" |
