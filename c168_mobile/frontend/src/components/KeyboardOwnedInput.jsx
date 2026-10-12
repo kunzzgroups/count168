@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { startTransition, useEffect, useRef, useState } from "react";
 
 /**
  * A text field whose text belongs to the phone's keyboard, not to React.
@@ -37,6 +37,14 @@ export default function KeyboardOwnedInput({
   /** Optional side effect for the ✕ (a page that resets more than the text). */
   onClear,
   clearButtonClassName,
+  /**
+   * Live-filter fields only. While the IME owns a composition — Sogou and other Chinese keyboards
+   * keep one open, which is also why the first backspace looks ignored — coalesce updates to at most
+   * one per N ms and hand them to React as a transition, so re-rendering the result list can never
+   * stall the keyboard on a slow phone. `0` (default) keeps updates immediate: form fields are read
+   * on submit and must never be a keystroke behind.
+   */
+  composeThrottleMs = 0,
   /** Optional outer ref (e.g. to focus the field when a panel opens). */
   inputRef: externalRef,
   ...inputProps
@@ -47,6 +55,11 @@ export default function KeyboardOwnedInput({
   onValueChangeRef.current = onValueChange;
   /** Only maintained when a ✕ is rendered — login/password fields do not need it. */
   const needsText = Boolean(clearLabel);
+  /** Coalescing clock for `composeThrottleMs`. */
+  const lastCallRef = useRef(0);
+  /** Trailing flush for a coalesced update, so a pause (no compositionend) still catches up. */
+  const flushTimerRef = useRef(0);
+  const defer = composeThrottleMs > 0;
   /** The last text we published or adopted — compared against, never written back blindly. */
   const lastTextRef = useRef(initialValue);
 
@@ -61,20 +74,46 @@ export default function KeyboardOwnedInput({
     if (!el) return undefined;
     lastTextRef.current = el.value;
 
-    const publish = () => {
-      if (el.value === lastTextRef.current) return;
-      lastTextRef.current = el.value;
-      if (needsText) setText(el.value);
-      onValueChangeRef.current?.(el.value);
+    const cancelFlush = () => {
+      if (flushTimerRef.current) {
+        window.clearTimeout(flushTimerRef.current);
+        flushTimerRef.current = 0;
+      }
+    };
+
+    /** Hand the field's current text to the caller (unless it is what we already published). */
+    const applyNow = () => {
+      cancelFlush();
+      const text = el.value;
+      if (text === lastTextRef.current) return;
+      lastTextRef.current = text;
+      lastCallRef.current = performance.now();
+      if (needsText) setText(text);
+      if (defer) startTransition(() => onValueChangeRef.current?.(text));
+      else onValueChangeRef.current?.(text);
+    };
+
+    const publish = (event) => {
+      const composing = Boolean(event && event.type === "input" && event.isComposing);
+      if (defer && composing && performance.now() - lastCallRef.current < composeThrottleMs) {
+        /* Coalesce, but always schedule the trailing flush: the user may simply stop typing with the
+           composition still open, and the list must still catch up to what they see. */
+        if (!flushTimerRef.current) {
+          flushTimerRef.current = window.setTimeout(applyNow, composeThrottleMs);
+        }
+        return;
+      }
+      applyNow();
     };
 
     el.addEventListener("input", publish);
     el.addEventListener("compositionend", publish);
     return () => {
+      cancelFlush();
       el.removeEventListener("input", publish);
       el.removeEventListener("compositionend", publish);
     };
-  }, [needsText]);
+  }, [needsText, defer, composeThrottleMs]);
 
   useEffect(() => {
     const el = inputRef.current;

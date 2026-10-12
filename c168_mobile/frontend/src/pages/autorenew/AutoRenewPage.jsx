@@ -135,6 +135,7 @@ export default function AutoRenewPage() {
         <KeyboardOwnedInput
           value={api.search}
           onValueChange={api.setSearch}
+          composeThrottleMs={80}
           placeholder={t("searchPlaceholder")}
         />
       </label>

@@ -546,7 +546,12 @@ export function LinkAccountSheet({ open, onClose, account }) {
       </div>
       <div className="m-account-sheet-search">
         <i className="fas fa-magnifying-glass" aria-hidden="true" />
-        <KeyboardOwnedInput value={query} onValueChange={setQuery} placeholder={i18n.searchAccounts} />
+        <KeyboardOwnedInput
+          value={query}
+          onValueChange={setQuery}
+          composeThrottleMs={80}
+          placeholder={i18n.searchAccounts}
+        />
       </div>
       <div className="m-account-check-list">
         {rows.map((row) => (

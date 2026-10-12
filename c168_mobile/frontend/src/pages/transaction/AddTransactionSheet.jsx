@@ -260,6 +260,10 @@ function AccountPicker({
             <KeyboardOwnedInput
               inputRef={searchRef}
               onValueChange={applyQuery}
+              /* Sogou/中文输入法在旧机上会持续保持组合：组合期间把过滤合并到每 80ms 一次，
+                 并交给 React 以 transition 处理 —— 列表重渲染永远不会拖住键盘（用户报的
+                 “输入后按删除延迟”就是这么来的）。 */
+              composeThrottleMs={80}
               placeholder={searchPlaceholder}
               autoComplete="off"
               autoCorrect="off"

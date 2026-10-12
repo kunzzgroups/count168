@@ -6,6 +6,7 @@
  * Drives the real `AddTransactionSheet` → AccountPicker in a phone-sized headless Chromium:
  *   A) IME / word-mode typing  → search must filter and must not be rewritten
  *   A2) keyboard-written text  → must survive React's next render (Android Gboard)
+ *   A3) a burst of composition updates (Sogou on an old phone) → coalesced, never stale, cheap
  *   B) delete after filtering  → jank must not grow with the account count
  *   C) opening the picker      → must not freeze while mounting the list
  *   D) tapping over the panel   → must reach the panel, not the row's hidden date input
@@ -385,6 +386,48 @@ async function main() {
     );
     await evalInPage("window.__harness.setQuery(''); true");
     await sleep(250);
+
+    /* ── A3) a burst of composition updates (Sogou on an old phone) must stay cheap and catch up ──
+       Four updates land in the same tick, which is what a Chinese IME under load looks like. The
+       list may coalesce them, but it must end up on the text the user sees even if the composition
+       is never committed (the trailing flush), and it must not cost a long frame. */
+    await evalInPage("window.__harness.setQuery(''); true");
+    await sleep(250);
+    await evalInPage("window.__harness.resetMetrics(); true");
+    const burst = await evalInPage(`(() => {
+      const input = document.querySelector('.m-tx-account-picker-search input');
+      if (!input) return { error: 'no search input' };
+      input.focus();
+      input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: '' }));
+      for (const text of ['1', '10', '101', '1015']) {
+        input.value = text;
+        input.dispatchEvent(
+          new InputEvent('input', {
+            bubbles: true,
+            isComposing: true,
+            data: text,
+            inputType: 'insertCompositionText',
+          }),
+        );
+      }
+      return { value: input.value };
+    })()`);
+    await sleep(600);
+    const afterBurst = await evalInPage("window.__harness.snapshot()");
+    const burstMetrics = await evalInPage("window.__harness.metrics()");
+    record(
+      "ime: a burst of composition updates stays cheap and still catches up",
+      burst.value === "1015" &&
+        afterBurst.rendered > 0 &&
+        afterBurst.prefixMatches &&
+        burstMetrics.maxFrameGap < FRAME_GAP_BUDGET_MS,
+      {
+        ...burst,
+        filtered: afterBurst.rendered,
+        expected: afterBurst.expected,
+        maxFrameGap: Math.round(burstMetrics.maxFrameGap),
+      },
+    );
 
     /* ── B) delete after filtering ── */
     const scenario = await measureDeletePhase();

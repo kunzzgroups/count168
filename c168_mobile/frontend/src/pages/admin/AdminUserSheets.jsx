@@ -250,6 +250,7 @@ function AccessPickerSheet({
         <KeyboardOwnedInput
           value={query}
           onValueChange={setQuery}
+          composeThrottleMs={80}
           placeholder={i18n.searchOptions}
         />
       </label>
@@ -354,6 +355,7 @@ function TenantAssignmentSheet({ open, onClose, admin }) {
         <KeyboardOwnedInput
           value={query}
           onValueChange={setQuery}
+          composeThrottleMs={80}
           placeholder={i18n.searchGroupCompany}
         />
       </label>

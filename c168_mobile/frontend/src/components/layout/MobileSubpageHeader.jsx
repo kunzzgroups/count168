@@ -43,6 +43,7 @@ export default function MobileSubpageHeader({
             value={search.value}
             onValueChange={search.onChange}
             onClear={search.onClear}
+            composeThrottleMs={80}
             placeholder={search.placeholder || ""}
             inputMode="search"
             enterKeyHint="search"

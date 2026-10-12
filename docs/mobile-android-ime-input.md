@@ -1,0 +1,78 @@
+# 手机版：安卓输入法相关的「丢字 / 删除延迟」通案
+
+> 状态：登录页 + 全站搜索框已修（2026-10-12）；本文记录**这一类**问题的机制与约束，避免再犯。
+> 关联：`components/KeyboardOwnedInput.jsx`、`dev-harness/login-loop.mjs`、`dev-harness/picker-loop.mjs`。
+
+## 1. 现象（都是同一类）
+
+- 登录页：打了字**字消失/跳**；用英文键盘敲完再按删除**「延迟一下」**
+- 搜索框：输入后**搜不到**，要**删掉一个字**才出现；列表显示的匹配和输入框里的字**不是同一个查询**
+- 报告过的设备：**旧安卓机 + 搜狗输入法**为主（也有 Gboard）
+
+## 2. 两个机制（都要堵）
+
+### 2.1 受控输入被 React 回写 → 字被吃掉
+
+`<input value={x} onChange={...}>`：安卓输入法是**自己把字写进 DOM** 的，React 看不见；
+下一次渲染（任何 state 变化：列表窗口增长、父组件刷新）React 就把自己手里的**旧值写回** →
+刚打的字消失、列表按旧查询过滤，**只有删一个字**（产生一个 React 看得见的事件）才重新对齐。
+
+### 2.2 每键重渲染把输入法拖住 → 删除"延迟"
+
+搜狗会**长期持有一个组合（composition）**：中文输入法里敲英文字母先进候选/下划线状态，
+**第一次按删除删的是输入法缓冲里的那一位**（看起来像"没反应"）。
+如果这时候我们还**每次组合更新都重渲染列表**，旧机上就是输入法在等我们 → 明显卡顿。
+
+## 3. 解法：一个共享组件
+
+`src/components/KeyboardOwnedInput.jsx`
+
+| 做法 | 原因 |
+|---|---|
+| **不受控**（`defaultValue`，绝不写 `value=`） | React 永不回写键盘拥有的文字（堵 2.1） |
+| **原生 `input` / `compositionend` 监听** | React 会去重它"已见过"的 `input` 事件，原生监听一定收到 |
+| `value` 只在**外部刻意变更**时采纳（预填 / blur 归一化 / 程序化清空） | 普通渲染一律不写，堵 2.1 又不丢功能 |
+| `composeThrottleMs`（搜索框用 80ms）：组合期间合并更新 + **尾随补发** | 堵 2.2；尾随补发保证"用户停手、组合没 commit"时列表仍会追上，不会回到"搜不到" |
+| 更新走 `startTransition`（仅 `composeThrottleMs > 0` 时） | 列表渲染变低优先级，React 可以先处理按键/删除 |
+| ✕ 由组件自己渲染并自己清 DOM | 文字状态不会和 DOM 脱节 |
+
+## 4. 铺开范围（2026-10-12）
+
+登录页（公司ID/用户名经 `useUppercaseField`、密码经 `PasswordInput`，后者覆盖**二级密码页**与账号/Admin/域名表单共 8 处调用点）；
+`MobileSubpageHeader`（两个报告页）、`MaintenanceSearchBar`、AccountPage、AutoRenewPage、DomainPage、
+`AdminUserSheets` ×2、`AccountSheets`、交易页 AccountPicker。
+
+## 5. 硬约束（别踩）
+
+1. **不要在 `onChange` 里改写值**（转大写、去符号、格式化）——那就是 2.1 的变体。
+   要归一化就**归一化 state / 提交值**，不要动 DOM：见 `DomainPage` 的 `forceSearchValue`。
+2. **表单字段不要开 `composeThrottleMs`**：提交要读 state，节流会让它慢一拍（登录页/密码框=0）。
+3. 搜索框的列表必须继续**窗口化**（`OPTION_WINDOW_STEP`）：一次挂几千行会让删除卡几秒（已修）。
+
+## 6. 验证（无需后端）
+
+```bash
+cd c168_mobile/frontend
+npm run dev -- --port 5174 --strictPort
+node dev-harness/login-loop.mjs      # 真登录页：字存活 / 眼睛开关 / type=password / 删除延迟 / 构建标记
+npm run dev -- --port 5200 --strictPort   # 另开一个 shell
+node dev-harness/picker-loop.mjs --n=2000 --throttle=6   # 选择器：含"组合突发"与 z-index 劫持
+node dev-harness/search-sweep.mjs    # 其它页面接线（无后端时会如实标 skipped）
+```
+
+改前对照：把源码改动暂时 stash 掉再跑，`login-loop` 会 5/5 失败（三个字段 `afterRerender` 全变空）。
+
+## 7. 构建标记（判定用户是否拿到新代码）
+
+登录页角落一行 9px 灰字：`build <git sha>[+] · MM-DD HH:mm`（由 `vite.config.js` 构建时注入）。
+
+- **手机版是远程 SPA**：不整体重载就一直是内存里那份旧 JS（APK 只是 resume 更明显）→
+  「修了没改善」很多时候是「还是旧 bundle」
+- `+` 表示构建时工作区还有未提交改动（本仓库 dist 与源码同批提交，属常态）
+- 让报障用户念这一行，就能判定新旧
+
+## 8. 现场排查顺序
+
+1. 让用户**换输入法**（Gboard/系统）做同样操作 → 立刻不卡 = 主因在输入法+旧机
+2. 让用户**杀掉 App 重开**再试（确保拿到新 bundle），并念出 `build` 号
+3. 记录：机型 / 安卓版本 / 输入法名+版本 / 哪个字段 / APK 还是浏览器 / 是否只在弱网、低电量、后台多时出现
