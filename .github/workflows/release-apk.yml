@@ -1,0 +1,120 @@
+name: Release APK (EazyCount)
+
+# 只手动触发：出包会影响所有用户的升级，绝不能挂在 push 上自动跑。
+on:
+  workflow_dispatch:
+    inputs:
+      domains:
+        description: "出哪些域名（空格分隔：site org com）"
+        required: true
+        default: "site org com"
+      upload:
+        description: "是否上传到服务器 /app/（先跑 no，比对无误再跑 yes）"
+        type: choice
+        options: ["no", "yes"]
+        default: "no"
+
+# 同一时间只跑一个出包任务，避免两个版本互相覆盖。
+concurrency:
+  group: release-apk
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 安装 platform 36 / build-tools 36
+        run: sdkmanager --install "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+
+      - name: 依赖
+        working-directory: c168_mobile/app
+        run: npm ci
+
+      # 密钥来自 Secret，不落仓库、不进构建缓存。加 secret 的方法见下。
+      - name: 写入签名密钥与 local.properties
+        working-directory: c168_mobile/app
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ANDROID_KEYSTORE_BASE64:-}" ]; then
+            echo "::error::缺少 secret ANDROID_KEYSTORE_BASE64（keystore 文件的 base64）"
+            exit 1
+          fi
+          mkdir -p keystore
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > keystore/eazycount.keystore
+          # 用 printf 逐行写，避开 heredoc 把 YAML 缩进带进文件内容
+          {
+            printf 'storeFile=../../keystore/eazycount.keystore\n'
+            printf 'storePassword=%s\n' "$KEYSTORE_PASSWORD"
+            printf 'keyAlias=%s\n' "$KEY_ALIAS"
+            printf 'keyPassword=%s\n' "$KEY_PASSWORD"
+          } > android/keystore.properties
+          # 路径相对 android/app/ 解析（build.gradle 用 file(...) 读它）
+          printf 'sdk.dir=%s\n' "$ANDROID_HOME" > android/local.properties
+
+      # release-apk.mjs 会验签并比对指纹：签名不对就整步失败，不会产出"用户装不上/必须卸载重装"的包。
+      - name: 出包 + 验签
+        working-directory: c168_mobile/app
+        run: node release-apk.mjs ${{ inputs.domains }}
+
+      - name: 收集产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: eazycount-apk
+          path: c168_mobile/app/dist-apk/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      # 上传用与部署 workflow 相同的 EC2 secrets；下载页仍要按 README 的顺序手动改。
+      - name: 上传到各域名 /app/
+        if: ${{ inputs.upload == 'yes' }}
+        working-directory: c168_mobile/app
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          VERSION=$(grep -oP 'versionName "\K[^"]+' android/app/build.gradle)
+          echo "上传版本 $VERSION"
+          install -m 600 /dev/null /tmp/k
+          printf '%s\n' "$EC2_SSH_KEY" > /tmp/k
+          declare -A DEST=( [site]=/var/www/count168/app [org]=/var/www/count168.org/app [com]=/var/www/count168.com/app )
+          for d in ${{ inputs.domains }}; do
+            scp -i /tmp/k -o StrictHostKeyChecking=accept-new \
+              "dist-apk/EazyCount-v${VERSION}-${d}.apk" \
+              "${EC2_USER}@${EC2_HOST}:${DEST[$d]}/EazyCount-v${VERSION}.apk"
+            echo "已上传 $d → ${DEST[$d]}/EazyCount-v${VERSION}.apk"
+          done
+          rm -f /tmp/k
+
+      - name: 下一步提醒
+        run: |
+          echo "APK 已在 artifact 里（或已上传）。别忘了同步下载页链接再 push："
+          echo "  c168_mobile/app/install-page/index.html → href=\"EazyCount-v<版本>.apk?v=<versionCode>\""
+          echo "顺序：先确认 APK 可下载，再改下载页，否则用户点下载 404。"
+
+# 需要的 Repository secrets（Settings → Secrets and variables → Actions）：
+#   ANDROID_KEYSTORE_BASE64  keystore 文件的 base64：base64 -w0 keystore/eazycount.keystore
+#   KEYSTORE_PASSWORD        storePassword（见 c168_mobile/app/README.md「签名信息」）
+#   KEY_ALIAS                keyAlias（eazycount）
+#   KEY_PASSWORD             keyPassword
+#   EC2_HOST / EC2_USER / EC2_SSH_KEY  已存在（部署 workflow 在用），上传步骤复用
+#
+# 为什么值得放在 CI：签名不一致的包会让所有已安装用户必须卸载重装，而 release-apk.mjs 的指纹
+# 校验正好卡在这里；密钥只存在 Secret 里，比散落在各台电脑的 keystore 文件更不容易出错。
