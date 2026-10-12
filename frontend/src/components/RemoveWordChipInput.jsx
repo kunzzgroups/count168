@@ -26,10 +26,9 @@ export default function RemoveWordChipInput({
       const next = serializeRemoveWordChips(parseRemoveWordChips(raw));
       onChange?.(next);
       if (processId) {
-        const chips = parseRemoveWordChips(next);
-        if (chips.length) {
-          saveStoredRemoveWordChips(scopeCompanyId, processId, chips);
-        }
+        // Always sync, including empty: saveStored removes the key when no chips remain,
+        // otherwise stale chips get re-merged on the next open.
+        saveStoredRemoveWordChips(scopeCompanyId, processId, parseRemoveWordChips(next));
       }
     },
     [disabled, onChange, processId, scopeCompanyId],

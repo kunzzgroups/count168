@@ -13,11 +13,15 @@ function escapeRegex(str) {
 /**
  * Default: contain (substring).
  * Exact (`=WORD`): ASCII alnum/`_` neighbors block a match so short codes
- * (XX123) do not carve into longer ones (XX1234). CJK neighbors do not block.
+ * (XX123) do not carve into longer ones (XX1234). Words joined by spaces count
+ * as one phrase, so `=TOTAL` leaves `GRAND TOTAL` alone. CJK neighbors do not block.
  */
 function buildRemoveWordRegex(word, exact) {
   if (exact) {
-    return new RegExp(`(?<![A-Za-z0-9_])${escapeRegex(word)}(?![A-Za-z0-9_])`, "gi");
+    return new RegExp(
+      `(?<![A-Za-z0-9_]\\s*)${escapeRegex(word)}(?!\\s*[A-Za-z0-9_])`,
+      "gi",
+    );
   }
   return new RegExp(escapeRegex(word), "gi");
 }

@@ -82,8 +82,21 @@ export function findMainRowForTemplate(rows, idProduct, mainTemplate, appliedKey
     if (byIdx) return byIdx;
   }
 
-  const empty = pick((c) => !c.accountId && !c.accountDisplay);
-  if (empty) return empty;
+  // row_index is a position on whichever day the template was saved, so on another day's layout
+  // (e.g. an extra row above) it may match nothing. Taking the first empty row then hands this
+  // template to an earlier same-name row; take the empty row closest to the saved position instead.
+  const emptyCandidates = candidates.filter((c) => !c.accountId && !c.accountDisplay);
+  if (emptyCandidates.length) {
+    if (templateRowIndex == null) return emptyCandidates[0].row;
+    let best = emptyCandidates[0];
+    for (const c of emptyCandidates) {
+      const dist = Math.abs(c.rowIndex - templateRowIndex);
+      const bestDist = Math.abs(best.rowIndex - templateRowIndex);
+      // Equidistant: prefer the later row (extra rows are usually inserted above the target).
+      if (dist < bestDist || (dist === bestDist && c.rowIndex > best.rowIndex)) best = c;
+    }
+    return best.row;
+  }
 
   // Prefer the candidate whose id equals the template id_product exactly.
   const exactId = pick((c) => summaryIdProductsEqual(c.row.idProduct, idProduct));

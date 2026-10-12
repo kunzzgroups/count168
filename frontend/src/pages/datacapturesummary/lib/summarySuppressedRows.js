@@ -64,11 +64,16 @@ export function isRowSuppressed(row, suppressed = loadSuppressedRowKeys()) {
 export function isParentRowSuppressed(subRow, rows, suppressed = loadSuppressedRowKeys()) {
   if (!subRow || subRow.productType !== "sub") return false;
   const parentNorm = normalizeSummaryIdProductText(subRow.parentIdProduct || "");
-  const parent = rows.find(
-    (r) =>
-      r.productType === "main" &&
-      (normalizeSummaryIdProductText(r.idProduct) === parentNorm ||
-        r.rowIndex === subRow.parentRowIndex)
+  const sameIdMains = rows.filter(
+    (r) => r.productType === "main" && normalizeSummaryIdProductText(r.idProduct) === parentNorm
   );
+  // Same Id Product can repeat on independent rows: the real parent is the one on the sub's own
+  // row, not simply the first same-name MAIN (that would hide/show subs by an unrelated row).
+  const parent =
+    (subRow.parentRowIndex != null
+      ? sameIdMains.find((r) => r.rowIndex === subRow.parentRowIndex)
+      : null) ||
+    sameIdMains[0] ||
+    rows.find((r) => r.productType === "main" && r.rowIndex === subRow.parentRowIndex);
   return parent ? isRowSuppressed(parent, suppressed) : false;
 }

@@ -101,7 +101,13 @@ export default function DataCaptureTableSection({
   }, [tableExpanded]);
 
   const captureTypeOptions = useMemo(
-    () => CAPTURE_TYPE_OPTIONS.map((opt) => ({ value: opt, label: captureTypeLabel(opt, t) })),
+    () =>
+      CAPTURE_TYPE_OPTIONS.filter(
+        (opt) =>
+          // Hidden from the dropdown for now (paste handling / auto-detect / saved snapshots still support them):
+          // opt !== "2.Format" && opt !== "CITIBET"
+          opt !== "2.Format" && opt !== "CITIBET",
+      ).map((opt) => ({ value: opt, label: captureTypeLabel(opt, t) })),
     [t],
   );
 
