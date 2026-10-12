@@ -157,7 +157,6 @@ export default function DomainPage() {
         <KeyboardOwnedInput
           value={domain.search}
           onValueChange={(text) => domain.setSearch(forceSearchValue(text))}
-          filterOnCompositionEnd
           placeholder={t("searchPlaceholder")}
         />
       </label>

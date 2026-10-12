@@ -42,6 +42,8 @@ const PasswordInput = forwardRef(function PasswordInput(
     commitCompositionOnIdleMs = 0,
     /** …or on every keystroke (the `always` mode of lib/compositionCommit.js). */
     commitCompositionOnInput = false,
+    /** …or the moment a delete key is pressed (the default; see KeyboardOwnedInput). */
+    commitCompositionOnDeleteKey = true,
     showLabel = "Show password",
     hideLabel = "Hide password",
     className = "",
@@ -80,6 +82,7 @@ const PasswordInput = forwardRef(function PasswordInput(
         value={value}
         commitCompositionOnIdleMs={commitCompositionOnIdleMs}
         commitCompositionOnInput={commitCompositionOnInput}
+        commitCompositionOnDeleteKey={commitCompositionOnDeleteKey}
         onValueChange={(text) => onChange?.({ target: { value: text } })}
         disabled={disabled}
         spellCheck={false}

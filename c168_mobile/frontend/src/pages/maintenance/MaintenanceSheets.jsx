@@ -34,7 +34,6 @@ export function MaintenanceSearchBar({ value, onChange, placeholder, clearAriaLa
       <KeyboardOwnedInput
         value={value}
         onValueChange={onChange}
-        filterOnCompositionEnd
         placeholder={placeholder}
         clearLabel={clearAriaLabel || "Clear"}
       />

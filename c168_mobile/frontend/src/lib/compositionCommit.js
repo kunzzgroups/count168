@@ -22,7 +22,7 @@
  * forcing a commit mid-word would break pinyin candidate selection.
  */
 const STORAGE_KEY = "ec_commit_mode";
-const MODES = ["pause", "always", "none"];
+const MODES = ["on-backspace", "pause", "always", "none"];
 /** Idle time for the `pause` mode. Short on purpose: the reported stalls are seconds long. */
 export const PAUSE_MS = 300;
 
@@ -38,11 +38,11 @@ export function readCommitMode(search = typeof window !== "undefined" ? window.l
   const param = new URLSearchParams(search).get("commit");
   if (MODES.includes(param)) return param;
 
-  return "pause";
+  return "on-backspace";
 }
 
 export function writeCommitMode(mode) {
-  const next = MODES.includes(mode) ? mode : "pause";
+  const next = MODES.includes(mode) ? mode : "on-backspace";
   try {
     window.localStorage.setItem(STORAGE_KEY, next);
   } catch {
@@ -58,7 +58,20 @@ export function nextCommitMode(mode) {
 
 /** Props for KeyboardOwnedInput, derived from the mode. */
 export function commitProps(mode) {
-  if (mode === "always") return { commitCompositionOnInput: true, commitCompositionOnIdleMs: 0 };
-  if (mode === "none") return { commitCompositionOnInput: false, commitCompositionOnIdleMs: 0 };
-  return { commitCompositionOnInput: false, commitCompositionOnIdleMs: PAUSE_MS };
+  if (mode === "none") {
+    return {
+      commitCompositionOnDeleteKey: false,
+      commitCompositionOnInput: false,
+      commitCompositionOnIdleMs: 0,
+    };
+  }
+  if (mode === "always") {
+    return { commitCompositionOnDeleteKey: true, commitCompositionOnInput: true, commitCompositionOnIdleMs: 0 };
+  }
+  if (mode === "pause") {
+    return { commitCompositionOnDeleteKey: true, commitCompositionOnInput: false, commitCompositionOnIdleMs: PAUSE_MS };
+  }
+  /* on-backspace (default): hand the composition over exactly when a delete key is pressed — the case
+     users hit (type a word, immediately backspace) needs no pause at all. */
+  return { commitCompositionOnDeleteKey: true, commitCompositionOnInput: false, commitCompositionOnIdleMs: 0 };
 }

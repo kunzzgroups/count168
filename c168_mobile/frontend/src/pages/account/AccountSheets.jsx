@@ -560,7 +560,6 @@ export function LinkAccountSheet({ open, onClose, account }) {
         <KeyboardOwnedInput
           value={query}
           onValueChange={setQuery}
-          filterOnCompositionEnd
           placeholder={i18n.searchAccounts}
         />
       </div>

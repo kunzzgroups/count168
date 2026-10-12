@@ -256,7 +256,6 @@ function AccessPickerSheet({
         <KeyboardOwnedInput
           value={query}
           onValueChange={setQuery}
-          filterOnCompositionEnd
           placeholder={i18n.searchOptions}
         />
       </label>
@@ -364,7 +363,6 @@ function TenantAssignmentSheet({ open, onClose, admin }) {
         <KeyboardOwnedInput
           value={query}
           onValueChange={setQuery}
-          filterOnCompositionEnd
           placeholder={i18n.searchGroupCompany}
         />
       </label>

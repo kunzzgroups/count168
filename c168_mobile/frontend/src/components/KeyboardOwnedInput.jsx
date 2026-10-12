@@ -38,14 +38,14 @@ export default function KeyboardOwnedInput({
   onClear,
   clearButtonClassName,
   /**
-   * Live-filter fields only. While the IME owns a composition the text on screen is *intermediate*
-   * (pinyin letters that are about to become Chinese characters), so filtering on it shows the wrong
-   * list — "the result does not match what I typed". Those keystrokes are therefore not published;
-   * the committed text is published on `compositionend` (and on blur, in case an IME never sends one).
+   * Hand the composition over to the field the moment a delete key is pressed.
    *
-   * Plain typing is never delayed by this — only intermediate composition states are skipped.
+   * This is the fix for "I type a few characters and the first Backspace does nothing" (Sogou, older
+   * Android): the IME keeps the text in its own composition buffer, so that first Backspace edits the
+   * buffer instead of the field. The browser is not prevented from doing its job — we only make sure
+   * the text is real text by then. Enabled by default; it only ever acts while a composition is open.
    */
-  filterOnCompositionEnd = false,
+  commitCompositionOnDeleteKey = true,
   /**
    * Force the keyboard to *commit* a composition after the user pauses for this many ms (0 = never).
    *
@@ -88,8 +88,9 @@ export default function KeyboardOwnedInput({
   valueRef.current = value;
   /** Only maintained when a ✕ is rendered — login/password fields do not need it. */
   const needsText = Boolean(clearLabel);
-  const defer = filterOnCompositionEnd;
+  const defer = false;
   const commitOnIdle = commitCompositionOnIdleMs > 0;
+  const commitOnDeleteKey = Boolean(commitCompositionOnDeleteKey);
   const commitOnInput = Boolean(commitCompositionOnInput);
   /** The last text we published or adopted — compared against, never written back blindly. */
   const lastTextRef = useRef(initialValue);
@@ -120,7 +121,7 @@ export default function KeyboardOwnedInput({
     const commitNow = () => {
       idleTimer = 0;
       if (!composing) return;
-      if (!commitOnIdle && !commitOnInput) return;
+      if (!commitOnIdle && !commitOnInput && !commitOnDeleteKey) return;
       try {
         const end = el.value.length;
         el.setSelectionRange(end, end);
@@ -149,14 +150,29 @@ export default function KeyboardOwnedInput({
     };
 
     const publish = (event) => {
-      const composing = Boolean(event && event.type === "input" && event.isComposing);
       /*
-       * Live-filter fields: never publish an intermediate composition state. The text at that moment
-       * is pinyin (or an unfinished word), so filtering on it would show a list that does not match
-       * what the user typed — and the committed text arrives right after on `compositionend` anyway.
+       * Always publish what the field currently shows, composition or not.
+       *
+       * Earlier this skipped intermediate composition states (on the theory that pinyin letters would
+       * filter the list "wrongly"), but Chinese keyboards also hold plain English/digits as a
+       * composition — so skipping them left the list behind the text for seconds, which is the
+       * "input and results do not match" report. The list must always match the visible text.
        */
-      if (defer && composing) return;
+      void event;
       applyNow();
+    };
+
+    /**
+     * Delete keys are the one place where a held composition has to give way *before* the key is
+     * handled: the first Backspace otherwise disappears into the IME's buffer. `preventDefault()` is
+     * deliberately not called — the browser still performs the deletion, we only hand the text over.
+     */
+    const onKeyDown = (event) => {
+      if (!commitOnDeleteKey) return;
+      const isDeleteKey =
+        event.key === "Backspace" || event.key === "Delete" || event.keyCode === 8 || event.keyCode === 46;
+      if (!isDeleteKey) return;
+      if (composing || event.isComposing) commitNow();
     };
 
     const onCompositionStart = () => {
@@ -174,11 +190,6 @@ export default function KeyboardOwnedInput({
      */
     const onBlur = () => {
       cancelIdle();
-      /*
-       * Belt and braces for the live-filter case: if an IME never sends `compositionend`, blur is the
-       * last chance to hand the field's text over, so the list cannot stay stuck on a stale keyword.
-       */
-      if (defer) applyNow();
       if (!applyValueOnBlur) return;
       const external = valueRef.current;
       if (external === undefined || external === el.value || external === lastTextRef.current) return;
@@ -191,6 +202,7 @@ export default function KeyboardOwnedInput({
     el.addEventListener("compositionend", publish);
     el.addEventListener("compositionstart", onCompositionStart);
     el.addEventListener("compositionend", onCompositionEnd);
+    el.addEventListener("keydown", onKeyDown, true);
     el.addEventListener("blur", onBlur);
     return () => {
       cancelIdle();
@@ -198,9 +210,10 @@ export default function KeyboardOwnedInput({
       el.removeEventListener("compositionend", publish);
       el.removeEventListener("compositionstart", onCompositionStart);
       el.removeEventListener("compositionend", onCompositionEnd);
+      el.removeEventListener("keydown", onKeyDown, true);
       el.removeEventListener("blur", onBlur);
     };
-  }, [needsText, defer, commitOnIdle, commitCompositionOnIdleMs, commitOnInput, applyValueOnBlur]);
+  }, [needsText, defer, commitOnIdle, commitCompositionOnIdleMs, commitOnInput, commitOnDeleteKey, applyValueOnBlur]);
 
   useEffect(() => {
     const el = inputRef.current;

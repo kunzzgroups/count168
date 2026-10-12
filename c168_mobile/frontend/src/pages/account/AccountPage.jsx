@@ -122,7 +122,6 @@ export default function AccountPage() {
         <KeyboardOwnedInput
           value={account.search}
           onValueChange={account.setSearch}
-          filterOnCompositionEnd
           placeholder={i18n.searchAccounts}
         />
       </label>

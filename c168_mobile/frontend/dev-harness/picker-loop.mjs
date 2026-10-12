@@ -307,16 +307,15 @@ async function main() {
     const beforeComposition = await evalInPage("window.__harness.snapshot()");
     const composedDigits = await compose("2135");
     record(
-      "ime: an unfinished composition does not filter the list",
+      "ime: the list follows the visible text during a composition",
       composedDigits.value === "2135" &&
-        composedDigits.rendered >= beforeComposition.rendered - 1 &&
-        composedDigits.rendered < 200 &&
-        !composedDigits.prefixMatches,
+        composedDigits.expected > 0 &&
+        composedDigits.rendered > 0 &&
+        composedDigits.prefixMatches,
       {
         valueDuringComposition: composedDigits.value,
         renderedDuringComposition: composedDigits.rendered,
-        renderedBefore: beforeComposition.rendered,
-        filteredOnIntermediate: composedDigits.prefixMatches,
+        expected: composedDigits.expected,
       },
     );
 
@@ -466,6 +465,52 @@ async function main() {
         maxFrameGap: Math.round(burstMetrics.maxFrameGap),
       },
     );
+
+    /* ── A-delete) a delete key must hand a held composition over first ──
+       "Type a few characters, press Backspace once, nothing happens" — the IME keeps the text in its own
+       buffer, so the press has to turn that buffer into real text before the browser deletes. Runs at the
+       end of the IME section because it deliberately leaves the field in a fresh state. */
+    await evalInPage("window.__handedOver = 0; window.addEventListener('ec:composition-committed', () => { window.__handedOver += 1; }, true); true");
+    await evalInPage(`(() => {
+      const input = document.querySelector('.m-tx-account-picker-search input');
+      input.focus();
+      input.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: input.value }));
+      input.value = '';
+      input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: '' }));
+      input.value = 'abc';
+      input.dispatchEvent(
+        new InputEvent('input', { bubbles: true, isComposing: true, data: 'abc', inputType: 'insertCompositionText' }),
+      );
+      return input.value;
+    })()`);
+    await sleep(200);
+    for (const type of ["rawKeyDown", "keyUp"]) {
+      await send("Input.dispatchKeyEvent", {
+        type,
+        key: "Backspace",
+        code: "Backspace",
+        windowsVirtualKeyCode: 8,
+        nativeVirtualKeyCode: 8,
+      });
+    }
+    await sleep(250);
+    const deleteHandOver = await evalInPage(`(() => {
+      const input = document.querySelector('.m-tx-account-picker-search input');
+      return { value: input ? input.value : null, handedOver: window.__handedOver || 0 };
+    })()`);
+    record(
+      "ime: a delete key hands the composition over, so the first press deletes",
+      deleteHandOver.handedOver >= 1 && deleteHandOver.value === "ab",
+      deleteHandOver,
+    );
+    /* put the field back to a clean state for the next phase */
+    await evalInPage(`(() => {
+      const input = document.querySelector('.m-tx-account-picker-search input');
+      input.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: input.value }));
+      window.__harness.setQuery('');
+      return true;
+    })()`);
+    await sleep(250);
 
     /* ── B) delete after filtering ── */
     const scenario = await measureDeletePhase();

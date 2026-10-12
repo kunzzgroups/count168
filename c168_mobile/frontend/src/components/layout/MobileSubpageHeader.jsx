@@ -43,7 +43,6 @@ export default function MobileSubpageHeader({
             value={search.value}
             onValueChange={search.onChange}
             onClear={search.onClear}
-            filterOnCompositionEnd
             placeholder={search.placeholder || ""}
             inputMode="search"
             enterKeyHint="search"

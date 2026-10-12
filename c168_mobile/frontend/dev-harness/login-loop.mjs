@@ -243,9 +243,16 @@ async function main() {
       return true;
     })()`);
     await send("Input.imeSetComposition", { text: "abc", selectionStart: 3, selectionEnd: 3 });
-    await sleep(1400); /* past the 800ms idle threshold */
-    const forced = await evalInPage(
-      "(() => { const el = document.querySelector('#user-id'); return { count: window.__forcedCommits || 0, value: el ? el.value : null }; })()",
+    await evalInPage(`(() => {
+      const el = document.querySelector('#user-id');
+      el.focus();
+      el.value = '';
+      return true;
+    })()`);
+    await send("Input.imeSetComposition", { text: "abc", selectionStart: 3, selectionEnd: 3 });
+    await sleep(150);
+    const beforeDelete = await evalInPage(
+      "(() => { const el = document.querySelector('#user-id'); return el ? el.value : null; })()",
     );
     for (const type of ["rawKeyDown", "keyUp"]) {
       await send("Input.dispatchKeyEvent", {
@@ -257,20 +264,39 @@ async function main() {
       });
     }
     await sleep(250);
-    const afterForcedDelete = await evalInPage(
-      "(() => { const el = document.querySelector('#user-id'); return el ? el.value : null; })()",
+    const afterDelete = await evalInPage(
+      "(() => { const el = document.querySelector('#user-id'); return { value: el ? el.value : null, count: window.__forcedCommits || 0 }; })()",
     );
     record(
-      "login: a paused IME composition is handed over to the field (delete hits real text)",
-      forced.count >= 1 &&
-        typeof afterForcedDelete === "string" &&
-        afterForcedDelete.length < String(forced.value || "").length,
-      {
-        forcedCommits: forced.count,
-        valueBeforeDelete: forced.value,
-        valueAfterDelete: afterForcedDelete,
-      },
+      "login: a delete key hands the held composition over (first press deletes)",
+      afterDelete.count >= 1 &&
+        typeof afterDelete.value === "string" &&
+        afterDelete.value.length < String(beforeDelete || "").length,
+      { valueBeforeDelete: beforeDelete, ...afterDelete },
     );
+
+    /* the pause variant is still selectable, and must hand over without any key press */
+    await send("Page.navigate", { url: withFlag("commit=pause") });
+    await waitFor(() => evalInPage("!!document.querySelector('#company-id')"), {
+      label: "login form (commit=pause)",
+      timeout: 40000,
+    });
+    await sleep(400);
+    await evalInPage(
+      "window.__pauseCommitted = 0; window.addEventListener('ec:composition-committed', () => { window.__pauseCommitted += 1; }, true); true",
+    );
+    await evalInPage(`(() => {
+      const el = document.querySelector('#user-id');
+      el.focus();
+      el.value = '';
+      return true;
+    })()`);
+    await send("Input.imeSetComposition", { text: "abc", selectionStart: 3, selectionEnd: 3 });
+    await sleep(900); /* past PAUSE_MS */
+    const pauseCommitted = await evalInPage("window.__pauseCommitted || 0");
+    record("login: 'commit=pause' hands a composition over without a key press", pauseCommitted >= 1, {
+      forcedCommits: pauseCommitted,
+    });
 
     /* D-3) the aggressive mode: `?commit=always` hands every keystroke over immediately */
     await send("Page.navigate", { url: withFlag("commit=always") });
