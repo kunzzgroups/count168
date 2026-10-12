@@ -11,6 +11,7 @@ import { isNative } from "../../lib/biometricStore.js";
 import { useBiometricEnrol, BiometricEnrolModal } from "../../components/lock/BiometricEnrolModal.jsx";
 import { readLastCompanyId, writeLastCompanyId } from "../../lib/lastLoginPrefs.js";
 import KeyboardOwnedInput from "../../components/KeyboardOwnedInput.jsx";
+import { formatTypingReport, readTypingReport, startTypingProbe } from "../../lib/typingProbe.js";
 import { onBrandLogoError } from "../../lib/brandAssets.js";
 
 // 登录页 logo：先播拼图动图（webp，54 帧），放完换成静态图。
@@ -247,6 +248,16 @@ export default function LoginPage() {
       document.removeEventListener("focusout", onFocusOut);
       document.body.classList.remove("is-typing");
     };
+  }, []);
+
+  /*
+   * Device-side typing measurement. Users on old phones with Sogou report lag that cannot be
+   * reproduced off-device, so the only honest next step is to measure it where it happens: tapping
+   * the build marker shows this device's WebView version and the per-keystroke paint latency.
+   */
+  const [typingReport, setTypingReport] = useState(null);
+  useEffect(() => {
+    startTypingProbe();
   }, []);
 
   const verifyTimeoutRef = useRef(null);
@@ -792,8 +803,16 @@ export default function LoginPage() {
             </div>
           </div>
           {/* 构建标记：报障时让用户念这一行，就能判断他跑的是哪份 bundle
-              （手机版是远程 SPA，不重载就一直是旧的；这样能直接排除“旧代码”这一层）。 */}
-          <p className="sc-login-build">build {BUILD_ID}</p>
+              （手机版是远程 SPA，不重载就一直是旧的；这样能直接排除“旧代码”这一层）。
+              点一下 → 显示本机的 WebView 版本与实测按键延迟（见 lib/typingProbe.js）。 */}
+          <button type="button" className="sc-login-build" onClick={() => setTypingReport(readTypingReport())}>
+            build {BUILD_ID}
+          </button>
+          {typingReport ? (
+            <pre className="sc-login-diag" onClick={() => setTypingReport(null)}>
+              {formatTypingReport(typingReport)}
+            </pre>
+          ) : null}
         </div>
       </div>
 

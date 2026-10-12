@@ -499,6 +499,98 @@ async function main() {
       { jankAtN, jankFloor, allowed, totalAtN, totalFloor },
     );
 
+    /* ── F) a normal form field (not a search box): typing + deleting an amount ──
+       The reported complaint is that *every* input lags on an old phone, not just the picker, so the
+       same per-key latency is measured here on the transaction sheet's amount field. */
+    const amountSelector = "window.__harness.formField('amount')";
+    const amountExists = await evalInPage(`!!${amountSelector}`);
+    if (!amountExists) {
+      record("form: typing an amount stays responsive", false, { error: "amount field not found" });
+    } else {
+      await evalInPage(`(() => {
+        const el = ${amountSelector};
+        el.focus();
+        el.value = '';
+        el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward' }));
+        return true;
+      })()`);
+      await sleep(250);
+      await evalInPage("window.__harness.resetMetrics(); true");
+
+      const amountLatencies = [];
+      let typed = "";
+      for (const ch of "12345678") {
+        const t0 = await evalInPage("performance.now()");
+        await send("Input.insertText", { text: ch });
+        typed += ch;
+        let applied = null;
+        const deadline = Date.now() + 3000;
+        while (Date.now() < deadline) {
+          const value = await evalInPage(`(() => { const el = ${amountSelector}; return el ? el.value : null; })()`);
+          if (value === typed) {
+            applied = await evalInPage("performance.now()");
+            break;
+          }
+          await sleep(20);
+        }
+        amountLatencies.push(applied === null ? null : Math.round(applied - t0));
+        await sleep(110);
+      }
+
+      /* then four backspaces */
+      const deleteLatencies = [];
+      for (let i = 0; i < 4; i += 1) {
+        const t0 = await evalInPage("performance.now()");
+        for (const type of ["rawKeyDown", "keyUp"]) {
+          await send("Input.dispatchKeyEvent", {
+            type,
+            key: "Backspace",
+            code: "Backspace",
+            windowsVirtualKeyCode: 8,
+            nativeVirtualKeyCode: 8,
+          });
+        }
+        typed = typed.slice(0, -1);
+        let applied = null;
+        const deadline = Date.now() + 3000;
+        while (Date.now() < deadline) {
+          const value = await evalInPage(`(() => { const el = ${amountSelector}; return el ? el.value : null; })()`);
+          if (value === typed) {
+            applied = await evalInPage("performance.now()");
+            break;
+          }
+          await sleep(20);
+        }
+        deleteLatencies.push(applied === null ? null : Math.round(applied - t0));
+        await sleep(110);
+      }
+
+      const metrics = await evalInPage("window.__harness.metrics()");
+      const finalValue = await evalInPage(`(() => { const el = ${amountSelector}; return el ? el.value : null; })()`);
+      const nums = (arr) => arr.filter((n) => n !== null);
+      const maxType = nums(amountLatencies).length ? Math.max(...nums(amountLatencies)) : null;
+      const maxDelete = nums(deleteLatencies).length ? Math.max(...nums(deleteLatencies)) : null;
+      const budget = Number(argv.formBudget || 120 + 6 * THROTTLE);
+
+      record(
+        `form: typing+deleting an amount stays responsive (x${THROTTLE}, budget ${budget}ms)`,
+        finalValue === "1234" &&
+          maxType !== null &&
+          maxDelete !== null &&
+          maxType < budget &&
+          maxDelete < budget,
+        {
+          finalValue,
+          maxTypeLatency: maxType,
+          maxDeleteLatency: maxDelete,
+          typeLatencies: amountLatencies,
+          deleteLatencies,
+          maxFrameGap: Math.round(metrics.maxFrameGap),
+          totalLongTask: Math.round(metrics.totalLongTask),
+        },
+      );
+    }
+
     /* Open cost is not gated in ms: the panel's own layout work dominates at every N. The
        structural check above ("a page, not every account") is the deterministic gate. */
     const openAtN = Math.round(openMetrics.maxFrameGap);

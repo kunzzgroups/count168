@@ -904,12 +904,38 @@ body.bg .sc-login-input::placeholder {
  * "still the old bundle". Keep it tiny and unobtrusive.
  */
 .sc-login-build {
-  margin: 10px 0 0;
-  text-align: center;
+  display: block;
+  margin: 10px auto 0;
+  padding: 3px 6px;
+  border: 0;
+  background: none;
+  font: inherit;
   font-size: 9px;
   line-height: 1.4;
   letter-spacing: 0.02em;
   color: rgba(255, 255, 255, 0.42);
+  cursor: pointer;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/*
+ * Device typing report, shown by tapping the build marker (see lib/typingProbe.js).
+ * Deliberately plain monospace so it can be screenshotted and sent to support as-is.
+ */
+.sc-login-diag {
+  margin: 6px auto 0;
+  max-width: 100%;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(2, 6, 23, 0.55);
+  color: rgba(255, 255, 255, 0.86);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 9px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  text-align: left;
   user-select: text;
   -webkit-user-select: text;
 }

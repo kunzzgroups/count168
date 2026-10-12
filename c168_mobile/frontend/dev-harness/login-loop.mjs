@@ -289,7 +289,8 @@ async function main() {
       typeWhenHidden: typeAfter,
     });
 
-    /* D0) the build marker: makes "which bundle is the user actually running" answerable. */
+    /* D0) the build marker: makes "which bundle is the user actually running" answerable, and it is
+       also the door to the on-device typing report (WebView version + measured paint latency). */
     const buildMarker = await evalInPage(
       "(() => { const el = document.querySelector('.sc-login-build'); return el ? el.textContent.trim() : null; })()",
     );
@@ -452,8 +453,24 @@ async function main() {
       { captured, expected: CREDENTIALS },
     );
 
-    console.log(JSON.stringify(results, null, 2));
-    const failed = results.checks.filter((c) => !c.pass);
+    /* F) the on-device typing report — the only way to measure a real phone + Sogou */
+    await evalInPage(
+      "(() => { const el = document.querySelector('.sc-login-build'); if (el) el.click(); return true; })()",
+    );
+    await sleep(300);
+    const diagText = await evalInPage(
+      "(() => { const el = document.querySelector('.sc-login-diag'); return el ? el.textContent : null; })()",
+    );
+    record(
+      "login: tapping the build marker shows the on-device typing report",
+      Boolean(diagText) &&
+        /webview/i.test(diagText) &&
+        /paint latency/i.test(diagText) &&
+        /keys? in/i.test(diagText),
+      { report: diagText },
+    );
+
+    console.log(JSON.stringify(results, null, 2));    const failed = results.checks.filter((c) => !c.pass);
     console.log(
       failed.length
         ? `\nRESULT: FAIL (${failed.length}/${results.checks.length})\n  - ${failed.map((f) => f.name).join("\n  - ")}`
