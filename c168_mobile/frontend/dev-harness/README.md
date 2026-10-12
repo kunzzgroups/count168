@@ -24,7 +24,7 @@ disappears again"* bug is reproduced on the **real page** there — run the app 
 npm run dev -- --port 5174 --strictPort
 node dev-harness/login-loop.mjs                      # 5 checks, all 5 fail on the pre-fix code
 node dev-harness/search-sweep.mjs                    # wiring check for the other search boxes
-node dev-harness/pin-lock-loop.mjs                   # 21 checks: lock screen + PIN pad + PIN setup + iOS paths
+node dev-harness/pin-lock-loop.mjs                   # 23 checks: lock screen + PIN pad + PIN setup + iOS paths + back-to-login
 ```
 
 `search-sweep.mjs` walks `/account`, `/maintenance/payment`, `/report/*`, `/more/auto-renew`,

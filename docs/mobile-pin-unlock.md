@@ -58,8 +58,24 @@ device_token ──────────────────────�
 | 服务端暂时不可用（维护 / 网络） | 留在锁屏，保留 PIN 与凭据 | 维护公告之类的信息原样透出 |
 | 在设置里关掉 PIN | 清 PIN；**若本机没有生物识别凭据**，顺手吐销那张设备令牌 | 否则它会以“谁也解不开的记录”留在服务端直到过期 |
 
-「返回登录」按钮**不清任何凭据**（与原来「用密码登录」一致）：
-这一次用密码 ≠ 把解锁关掉。
+「返回登录」按钮 = **真的回到登录页**：
+
+先 `POST logout_api.php` 结束当前会话，再跳 `/login`。为何必须这么做：
+登录页一挂载就会调 `current_user_api`，而锁屏上的“返回登录”并不结束会话 ——
+会话还活着 → 检查成功 → **用户被直接弹回 App**。实机反馈：
+“iOS 上点 Back to login 直接进去了，根本没看到登录页”。这不只是 UX 问题：
+那时任何人点一下就能绕过锁屏。
+
+两个“不”：
+
+- **不淁任何本地解锁凭据**：Keystore 里的生物识别凭据与 `ec_pin_unlock` 都不动，
+  所以下次冷启动该锁还是锁、该刷脸还是刷脸。服务端也不会被连坐：
+  `logout_api.php` 只吐销 **kind='web'** 且对应 `remember_token` cookie 的那一条，
+  移动端那张 kind='biometric' 的凭据不在其中。
+- 不清“上次登录的公司 ID”（那是 Settings 里主动退出的行为，与这里无关）。
+
+另外一个必须做的动作：`skipNextPasskeyAutoLogin()` —— 会话没了之后，
+iOS 的 passkey 自动登录会立刻把人刷回去（实机报过“点退出→弹窗→刷完又进去了”）。
 
 ## 4. 与生物识别的共用关系（重要）
 
@@ -156,7 +172,7 @@ cd c168_mobile/frontend
 node scripts/test-pin-unlock.mjs                      # 17/17：默认位数、加解密、失败计数、坏记录
 npm run dev -- --port 5174 --strictPort               # 另开一个 shell
 CHROME_PATH="C:/Program Files/Google/Chrome/Application/chrome.exe" \
-  node dev-harness/pin-lock-loop.mjs --shots=1        # 21/21：锁屏三态、错码、连错清 PIN、设置弹窗、4 位、iOS 路径、iOS 引导
+  node dev-harness/pin-lock-loop.mjs --shots=1        # 23/23：锁屏三态、错码、连错清 PIN、设置弹窗、4 位、iOS 路径、iOS 引导
 ```
 
 `dev-harness/pin-lock.html` 也可以直接手动打开看：`?bio=1` 模拟“同时有指纹”，

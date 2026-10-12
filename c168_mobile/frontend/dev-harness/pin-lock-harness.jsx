@@ -90,9 +90,11 @@ if (!WEB) window.androidBridge = window.androidBridge || {};
 const SECURE_PREFIX = "capacitor-storage_";
 const TOKEN_KEY = `${SECURE_PREFIX}count168_biometric_device_token`;
 
-/** 换会话的桩：真机上由 PHP 回这个形状 */
+/** 换会话的桩：真机上由 PHP 回这个形状。顺便把所有请求记下来给 CDP 看。 */
+window.__fetchLog = [];
 window.fetch = async (url) => {
   const body = String(url);
+  window.__fetchLog.push(body);
   if (body.includes("device_login_api.php")) {
     return new Response(
       JSON.stringify({ status: "success", redirect: "/dashboard", user_type: "user" }),
@@ -101,6 +103,12 @@ window.fetch = async (url) => {
   }
   if (body.includes("device_token_revoke_api.php") || body.includes("device_token_register_api.php")) {
     return new Response(JSON.stringify({ status: "success", token: DEVICE_TOKEN }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }
+  if (body.includes("logout_api.php")) {
+    return new Response(JSON.stringify({ status: "success" }), {
       status: 200,
       headers: { "content-type": "application/json" },
     });

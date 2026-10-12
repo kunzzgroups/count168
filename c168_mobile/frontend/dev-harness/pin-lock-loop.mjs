@@ -290,6 +290,26 @@ async function main() {
     // 这里断言的是**路由**，`released` 只当参考值打出来。
     record("4. 「返回登录」→ 跳到 /login", navigated === true, `released=${released}`);
 
+    // 只跳路由是不够的：登录页一挂载就查会话，会话还活着的话会被直接弹回 App
+    //（实机：iOS 上点 Back to login 直接进去了）。所以必须真的结束会话。
+    const backState = JSON.parse(
+      await evalInPage(`JSON.stringify({
+        logout: (window.__fetchLog || []).filter((u) => u.includes('logout_api.php')).length,
+        skipPasskey: sessionStorage.getItem('ec_skip_passkey_autologin_once'),
+        pinKept: localStorage.getItem('ec_pin_unlock') ? 'kept' : 'gone'
+      })`),
+    );
+    record(
+      "4b. 「返回登录」真的结束了会话（调了 logout_api）并禁掉本次 passkey 自动登录",
+      backState.logout >= 1 && backState.skipPasskey === "1",
+      JSON.stringify(backState),
+    );
+    record(
+      "4c. 同时**没有**连坐清掉本地解锁凭据（PIN 记录还在，下次冷启动照样能解）",
+      backState.pinKept === "kept",
+      JSON.stringify(backState),
+    );
+
     // ── 5. 同时有生物识别凭据的设备 ────────────────────────────────────
     console.log("device with a biometric credential too");
     await goto(`${BASE}?bio=1`);

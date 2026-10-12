@@ -20,6 +20,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { buildApiUrl } from "../utils/apiUrl.js";
+import { fetchJson } from "../lib/fetchJson.js";
 import {
   biometryInfo,
   clearToken,
@@ -37,6 +39,7 @@ import {
   saveSettings,
 } from "../lib/biometricSettings.js";
 import { nativeBiometricLogin, nativePinLogin } from "../lib/biometricLogin.js";
+import { skipNextPasskeyAutoLogin } from "../lib/webauthn.js";
 import {
   clearPin,
   pinAttemptsLeft,
@@ -174,22 +177,37 @@ export function useBiometricUnlock() {
   }, [goDisabled, navigate]);
 
   /**
-   * 用户点「用密码登录」。
+   * 用户点「用密码登录 / 返回登录」。
    *
-   * ⚠️ **不清凭据**（之前传的是 true，这是个真 bug）：
+   * ⚠️ **必须先把当前会话结束掉**，否则这句按钮是假的：
+   * 它只 `navigate("/login")`，而登录页一挂载就会调 `current_user_api`，
+   * 会话还活着 → 检查成功 → **直接被弹回 App**。
+   * 实机反馈：iOS 上「点 Back to login 直接进去了，根本没看到登录页」——
+   * 比 UX 问题更糟：那时任何人点一下就能绕过锁屏。
    *
-   * 「这一次用密码」不等于「把生物识别关掉」。用户可能只是因为
-   * 脸在暗处没识出来、或指纹湿了。原来这一下会把 Keystore 里的令牌删掉，
-   * 后果有两个，实机都报过：
-   *   1. 模型里 enabled=1 而 Keystore 里 token=no —— 状态与实际对不上，
-   *      生物识别再也登录不了；
-   *   2. 登录页的判断是“没有令牌就弹开启引导” → 于是**每次密码登录都弹引导**。
+   * ⚠️ **不清本地解锁凭据**（两者都不动）：
+   *   · Keystore 里的生物识别凭据 —— 本次会话结束不影响它；
+   *   · `ec_pin_unlock`（PIN 密文）—— 它加密的就是那张 device_token。
+   * 所以下次冷启动该锁还是锁、该刷脸还是刷脸。
+   * 服务端那边也不会被连坐：`logout_api.php` 只吐销 **kind='web'** 且
+   * 对应 `remember_token` cookie 的那一条（见 includes/device_token.php），
+   * 移动端那张 kind='biometric' 的凭据不在其中。
    *
-   * 保留凭据后：本次会话仍然正常地走密码登录（state 置 DISABLED 就够），
-   * 下次冷启动该弹生物识别还弹 —— 那正是功能本身。
-   * 真正失效的凭据（令牌过期 / 被吐销）由 unlock() 里的
-   * PERMANENT_FAILURE_CODES 分支清理，那里清才是对的。
+   * 网络不通时：照样去登录页，最坏情况与改动前一样（可能被会话检查弹回去）。
    */
+  const usePasswordInstead = useCallback(async () => {
+    try {
+      await fetchJson(buildApiUrl("api/session/logout_api.php"), { method: "POST" });
+    } catch {
+      /* 尽力而为：登录页仍然要能看到 */
+    }
+    // 会话没了之后，iOS 的 passkey 自动登录会立刻把人刷回来
+    //（实机报过「点了退出→弹窗→刷完又进去了」），标记成“本次不要自动登”
+    skipNextPasskeyAutoLogin();
+    await goDisabled(false);
+    navigate("/login", { replace: true });
+  }, [goDisabled, navigate]);
+
   /**
    * 弹生物识别**之前**的方式校正。
    *
@@ -220,12 +238,6 @@ export function useBiometricUnlock() {
     }
     await unlock();
   }, [unlock]);
-
-
-  const usePasswordInstead = useCallback(async () => {
-    await goDisabled(false);
-    navigate("/login", { replace: true });
-  }, [goDisabled, navigate]);
 
   /** 重新读 PIN 状态（设置页改过、或失败后被清掉时用） */
   const refreshPin = useCallback(() => {
