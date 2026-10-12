@@ -68,6 +68,9 @@ node release-apk.mjs com --force-fingerprint   # 确实要换密钥时才用
 出完包它会打印每个域名的 `scp` 命令和下载页要改的那一行。**顺序不能反：先上传 APK，再改
 `install-page/index.html` 的下载链接，最后 push**，否则用户点下载会 404。
 
+面向用户/客服的发布说明（含客服口径与验证记录）写在
+[`docs/release-announcement-v1.5.1.md`](../../docs/release-announcement-v1.5.1.md)。
+
 前置（都在本机、已 gitignore）：
 
 | 文件 | 内容 |
