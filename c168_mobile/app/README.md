@@ -49,6 +49,25 @@ node build-apk-for-site.mjs com --diag   # → dist-apk/EazyCount-v<版本>-com-
 
 `build-apk-for-site.mjs` 会把 `capacitor.config.json` 的 `server.url` 与 `www/index.html` 的重连地址临时改成对应域名，跑 `cap sync` + Gradle release，把产物拷到 `dist-apk/`，最后还原这两个文件。首次构建要下载 Gradle 和依赖，等几分钟。
 
+### 发布正式包：用 `release-apk.mjs`（别直接 scp 手出的包）
+
+```bash
+cd c168_mobile/app
+npm run release:apk            # = node release-apk.mjs，site/org/com 三个都出
+npm run release:apk com        # 只出 com（参数可任意组合）
+node release-apk.mjs com --force-fingerprint   # 确实要换密钥时才用
+```
+
+它比手动出包多两道保险：
+
+1. **没有 `android/keystore.properties` 就直接退出**（否则 Gradle 出的 `app-release-unsigned.apk` 装不上，也不会被拷进 `dist-apk/`）。
+2. **比对包内签名指纹**：新包证书 SHA-256 必须等于线上已发布包的
+   `953d3d44…d019`（见「签名信息」）。不一致就报错停住——因为**签名不同的包无法覆盖已安装的 App，
+   用户必须卸载重装（登录状态全丢）**，这种事必须在发布前发现，而不是等用户投诉。
+
+出完包它会打印每个域名的 `scp` 命令和下载页要改的那一行。**顺序不能反：先上传 APK，再改
+`install-page/index.html` 的下载链接，最后 push**，否则用户点下载会 404。
+
 前置（都在本机、已 gitignore）：
 
 | 文件 | 内容 |

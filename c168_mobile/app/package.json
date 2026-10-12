@@ -11,7 +11,8 @@
     "build:apk:debug": "cd android && gradlew.bat assembleDebug",
     "build:apk:site": "node build-apk-for-site.mjs site",
     "build:apk:org": "node build-apk-for-site.mjs org",
-    "build:apk:com": "node build-apk-for-site.mjs com"
+    "build:apk:com": "node build-apk-for-site.mjs com",
+    "release:apk": "node release-apk.mjs"
   },
   "dependencies": {
     "@aparajita/capacitor-biometric-auth": "^10.0.0",
