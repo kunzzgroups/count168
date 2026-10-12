@@ -59,6 +59,11 @@ export default function KeyboardOwnedInput({
    */
   commitCompositionOnIdleMs = 0,
   /**
+   * Hand **every** keystroke's composition over to the field immediately (the `always` mode of
+   * lib/compositionCommit.js). Most aggressive setting: the keyboard never gets to hold a buffer.
+   */
+  commitCompositionOnInput = false,
+  /**
    * Apply `value` to the field once it loses focus (0 = never). Only for callers whose state holds a
    * **normalised** version of the text (amounts strip letters, the 6-digit code strips non-digits).
    *
@@ -86,6 +91,7 @@ export default function KeyboardOwnedInput({
   const flushTimerRef = useRef(0);
   const defer = composeThrottleMs > 0;
   const commitOnIdle = commitCompositionOnIdleMs > 0;
+  const commitOnInput = Boolean(commitCompositionOnInput);
   /** The last text we published or adopted — compared against, never written back blindly. */
   const lastTextRef = useRef(initialValue);
 
@@ -121,7 +127,8 @@ export default function KeyboardOwnedInput({
     };
     const commitNow = () => {
       idleTimer = 0;
-      if (!composing || !commitOnIdle) return;
+      if (!composing) return;
+      if (!commitOnIdle && !commitOnInput) return;
       try {
         const end = el.value.length;
         el.setSelectionRange(end, end);
@@ -146,7 +153,9 @@ export default function KeyboardOwnedInput({
       if (needsText) setText(text);
       if (defer) startTransition(() => onValueChangeRef.current?.(text));
       else onValueChangeRef.current?.(text);
-      scheduleIdleCommit();
+      /* `always` mode: the keyboard never keeps a buffer between keystrokes. */
+      if (commitOnInput) commitNow();
+      else scheduleIdleCommit();
     };
 
     const publish = (event) => {
@@ -199,7 +208,7 @@ export default function KeyboardOwnedInput({
       el.removeEventListener("compositionend", onCompositionEnd);
       el.removeEventListener("blur", onBlur);
     };
-  }, [needsText, defer, composeThrottleMs, commitOnIdle, commitCompositionOnIdleMs, applyValueOnBlur]);
+  }, [needsText, defer, composeThrottleMs, commitOnIdle, commitCompositionOnIdleMs, commitOnInput, applyValueOnBlur]);
 
   useEffect(() => {
     const el = inputRef.current;

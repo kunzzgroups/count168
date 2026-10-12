@@ -11,7 +11,7 @@ import { isNative } from "../../lib/biometricStore.js";
 import { useBiometricEnrol, BiometricEnrolModal } from "../../components/lock/BiometricEnrolModal.jsx";
 import { readLastCompanyId, writeLastCompanyId } from "../../lib/lastLoginPrefs.js";
 import KeyboardOwnedInput from "../../components/KeyboardOwnedInput.jsx";
-import { COMPOSITION_COMMIT_MS } from "../../components/PasswordInput.jsx";
+import { commitProps, nextCommitMode, readCommitMode, writeCommitMode } from "../../lib/compositionCommit.js";
 import { formatTypingReport, readTypingReport, startTypingProbe } from "../../lib/typingProbe.js";
 import { applyLiteMode, isLiteMode, noteTypingReport, setLiteMode } from "../../lib/liteMode.js";
 import { onBrandLogoError } from "../../lib/brandAssets.js";
@@ -108,13 +108,11 @@ function useUppercaseField(initial = "") {
       onBlur,
       onFocus,
       /*
-       * Company id / username are codes: they never hold Chinese text, so if the keyboard keeps a
-       * composition open after the user pauses, hand it to the field. That is the automated version
-       * of the workaround users discovered themselves — "tap out of the box and back in, then delete
-       * works": tapping out clears the IME's composition buffer, and a delete that reaches real text
-       * is immediate. See KeyboardOwnedInput.commitCompositionOnIdleMs.
+       * Company id / username are codes: they never hold Chinese text, so a composition the keyboard
+       * keeps open is handed to the field (see lib/compositionCommit.js for how eagerly, and
+       * KeyboardOwnedInput for why: tapping out of a field clears the IME's buffer, after which a
+       * delete is immediate — this automates exactly that).
        */
-      commitCompositionOnIdleMs: COMPOSITION_COMMIT_MS,
       autoCapitalize: "none",
       autoCorrect: "off",
       spellCheck: false,
@@ -271,6 +269,14 @@ export default function LoginPage() {
    * the fastest way to tell whether the page's own paint cost is what makes typing lag in the WebView.
    */
   const [lite, setLite] = useState(() => isLiteMode());
+  /**
+   * How eagerly a paused/ongoing IME composition is handed to the field (see
+   * lib/compositionCommit.js). Switchable from the diagnostics panel so the strength can be tried on
+   * the affected phone without a rebuild.
+   */
+  const [commitMode, setCommitMode] = useState(() => readCommitMode());
+  /** Props derived from the commit mode, spread onto the fields that cannot take Chinese text. */
+  const commitFieldProps = useMemo(() => commitProps(commitMode), [commitMode]);
   useEffect(() => {
     startTypingProbe();
   }, []);
@@ -728,6 +734,7 @@ export default function LoginPage() {
                     inputMode="text"
                     enterKeyHint="next"
                     {...companyField.fieldProps}
+                    {...commitFieldProps}
                   />
                 </div>
 
@@ -743,6 +750,7 @@ export default function LoginPage() {
                     inputMode="text"
                     enterKeyHint="next"
                     {...userIdField.fieldProps}
+                    {...commitFieldProps}
                   />
                 </div>
 
@@ -756,7 +764,7 @@ export default function LoginPage() {
                     autoComplete="current-password"
                     enterKeyHint="go"
                     /* masked field, never Chinese text: same composition hand-over as the id fields */
-                    commitCompositionOnIdleMs={COMPOSITION_COMMIT_MS}
+                    {...commitFieldProps}
                     /* no `value` on purpose: typing must not re-render this page (see
                        useUppercaseField); the submit path reads passwordRef */
                     onChange={(e) => {
@@ -849,6 +857,14 @@ export default function LoginPage() {
                 onClick={() => setLite(setLiteMode(!lite))}
               >
                 {lite ? "极简模式：开 · lite mode: on" : "极简模式：关 · lite mode: off"}
+              </button>
+              {/* One tap on the real device: how eagerly a held composition is handed to the field. */}
+              <button
+                type="button"
+                className="sc-login-diag-link"
+                onClick={() => setCommitMode(writeCommitMode(nextCommitMode(commitMode)))}
+              >
+                提交模式 commit: {commitMode}
               </button>
               {/* Opens in the same WebView as the app itself — that is the point: the test page has to
                   run in the APK's engine, not in Chrome, to say anything about the APK. */}

@@ -242,7 +242,15 @@ export function readTypingReport() {
     current && current.keystrokes > 0
       ? { ...current, endedAt: performance.now() }
       : sessions[0] || null;
+  /* Which commit strength was in force — a screenshot has to be self-describing. */
+  let commitMode = null;
+  try {
+    commitMode = window.localStorage.getItem("ec_commit_mode");
+  } catch {
+    commitMode = null;
+  }
   return {
+    commitMode,
     ...webViewLine(),
     session: session
       ? {
@@ -277,7 +285,8 @@ export function formatTypingReport(report) {
   const lines = [
     `webview ${report.chrome ? `Chrome/WebView ${report.chrome}` : "?"}` +
       `${report.android ? ` · Android ${report.android}` : ""}` +
-      `${report.cores ? ` · ${report.cores} cores` : ""}`,
+      `${report.cores ? ` · ${report.cores} cores` : ""}` +
+      `${report.commitMode ? ` · commit ${report.commitMode}` : ""}`,
   ];
   if (report.nativeWebView) {
     /* The decisive line when comparing a laggy phone with a smooth one: which WebView *package* and

@@ -272,6 +272,31 @@ async function main() {
       },
     );
 
+    /* D-3) the aggressive mode: `?commit=always` hands every keystroke over immediately */
+    await send("Page.navigate", { url: withFlag("commit=always") });
+    await waitFor(() => evalInPage("!!document.querySelector('#company-id')"), {
+      label: "login form (commit=always)",
+      timeout: 40000,
+    });
+    await sleep(400);
+    await evalInPage(
+      "window.__alwaysCommitted = 0; window.addEventListener('ec:composition-committed', () => { window.__alwaysCommitted += 1; }, true); true",
+    );
+    await evalInPage(`(() => {
+      const el = document.querySelector('#user-id');
+      el.focus();
+      el.value = '';
+      return true;
+    })()`);
+    await send("Input.imeSetComposition", { text: "ab", selectionStart: 2, selectionEnd: 2 });
+    await sleep(150); /* far below the 300ms pause threshold of the default mode */
+    const alwaysCommitted = await evalInPage("window.__alwaysCommitted || 0");
+    record(
+      "login: '?commit=always' hands the composition over without waiting for a pause",
+      alwaysCommitted >= 1,
+      { forcedCommits: alwaysCommitted },
+    );
+
     /* Back to the normal variant for everything below. */
     await send("Page.navigate", { url: withFlag("lite=0") });
     await waitFor(() => evalInPage("!!document.querySelector('#company-id')"), {

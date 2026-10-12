@@ -40,6 +40,8 @@ const PasswordInput = forwardRef(function PasswordInput(
     defaultVisible = false,
     /** Fields that never take Chinese text can hand their composition over to the field on a pause. */
     commitCompositionOnIdleMs = 0,
+    /** …or on every keystroke (the `always` mode of lib/compositionCommit.js). */
+    commitCompositionOnInput = false,
     showLabel = "Show password",
     hideLabel = "Hide password",
     className = "",
@@ -77,6 +79,7 @@ const PasswordInput = forwardRef(function PasswordInput(
         initialValue={value ?? ""}
         value={value}
         commitCompositionOnIdleMs={commitCompositionOnIdleMs}
+        commitCompositionOnInput={commitCompositionOnInput}
         onValueChange={(text) => onChange?.({ target: { value: text } })}
         disabled={disabled}
         spellCheck={false}
