@@ -37,6 +37,10 @@ const CHROME =
   process.env.CHROME_PATH ||
   path.join(process.env.LOCALAPPDATA || "", "ms-playwright/chromium-1228/chrome-win64/chrome.exe");
 const WANT_SHOTS = argv.shots === "1" || argv.shots === true;
+/** 与 dev-harness/pin-lock-harness.jsx 的种子一致：产品默认 6 位 */
+const SEED_PIN = "482917";
+const SEED_LEN = SEED_PIN.length;
+const WRONG_PIN = "000111";
 const HERE = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -231,12 +235,16 @@ async function main() {
       pinOnlyState.pad && !pinOnlyState.retry && !pinOnlyState.app,
       pinOnly,
     );
-    record("1b. 键盘位数 = 4 位（与设置的位数一致）", pinOnlyState.dots === 4, pinOnly);
+    record(
+      `1b. 键盘位数 = ${SEED_LEN}（产品默认 6 位，与设置的位数一致）`,
+      pinOnlyState.dots === SEED_LEN,
+      pinOnly,
+    );
     record("1c. 有“返回登录”出口", pinOnlyState.back === true, pinOnly);
     await shot("pin-lock-pin-only.png");
 
     // ── 2. 错 PIN → 报错 + 清空 + 仍然锁着 ────────────────────────────
-    await typePin("0001");
+    await typePin(WRONG_PIN);
     const wrong = await waitFor(
       async () =>
         evalInPage(`(() => {
@@ -259,7 +267,7 @@ async function main() {
     await shot("pin-lock-wrong-pin.png");
 
     // ── 3. 对 PIN → 放行 ─────────────────────────────────────────────
-    await typePin("4821");
+    await typePin(SEED_PIN);
     const unlocked = await waitFor(
       async () => evalInPage("!!document.querySelector('#app-content')"),
       { label: "gate unlock", timeout: 15000 },
@@ -327,7 +335,7 @@ async function main() {
       label: "PIN pad (locked-out check)",
     });
     for (let i = 0; i < 5; i += 1) {
-      await typePin("0001");
+      await typePin(WRONG_PIN);
       await sleep(450);
     }
     const afterLockout = await waitFor(
@@ -378,17 +386,18 @@ async function main() {
       })`),
     );
     record(
-      "8. 弹窗默认 4 位，取消按钮在小屏（390×844）上看得到",
-      setupInitial.dots === 4 && setupInitial.cancel === true && setupInitial.cancelVisible === true,
+      `8. 弹窗默认 ${SEED_LEN} 位（产品默认），取消按钮在小屏（390×844）上看得到`,
+      setupInitial.dots === SEED_LEN && setupInitial.cancel === true && setupInitial.cancelVisible === true,
       `${JSON.stringify(setupInitial)}（overflow=页面高于视口，弹窗内可滚动）`,
     );
+    await shot("pin-setup-6.png");
 
-    await tap("pin-setup-len-6");
-    const sixDots = await evalInPage(
+    // 4 位仍然可选
+    await tap("pin-setup-len-4");
+    const fourDots = await evalInPage(
       `document.querySelectorAll('[data-testid="pin-setup-dots"] .bio-pin__dot').length`,
     );
-    record("8b. 切到 6 位 → 点阵变 6 个", sixDots === 6, `dots=${sixDots}`);
-    await shot("pin-setup-6.png");
+    record("8b. 切到 4 位 → 点阵变 4 个（4 位仍然可选）", fourDots === 4, `dots=${fourDots}`);
 
     const typeSetupPin = async (pin) => {
       for (const digit of pin) {
@@ -399,8 +408,8 @@ async function main() {
     };
 
     // 两次不一致 → 回到第一轮并说明原因，绝不能提交
-    await typeSetupPin("908171");
-    await typeSetupPin("908172");
+    await typeSetupPin("9081");
+    await typeSetupPin("9082");
     const mismatch = await waitFor(
       async () =>
         evalInPage(
@@ -416,15 +425,35 @@ async function main() {
     );
 
     // 两次一致 → 交给调用方（真机上是签发令牌 + 加密保存）
-    await typeSetupPin("908171");
-    await typeSetupPin("908171");
+    await typeSetupPin("9081");
+    await typeSetupPin("9081");
     const submitted = await waitFor(async () => evalInPage("JSON.stringify(window.__setupResult || null)"), {
       label: "setup submit",
     });
     record(
       "8d. 两次一致 → 交出 (pin, len)",
-      submitted === JSON.stringify({ pin: "908171", len: 6 }),
+      submitted === JSON.stringify({ pin: "9081", len: 4 }),
       submitted,
+    );
+
+    // ── 9. 旧的 4 位 PIN 照样能开（位数是用户选的，不是写死的）────────
+    console.log("4-digit PIN still works");
+    await goto(`${BASE}?pin=4821&len=4`);
+    await waitFor(async () => evalInPage("!!document.querySelector('[data-testid=\"bio-lock-pin-pad\"]')"), {
+      label: "4-digit PIN pad",
+    });
+    const fourState = await evalInPage(
+      `document.querySelectorAll('.bio-pin__dot').length`,
+    );
+    await typePin("4821");
+    const fourUnlocked = await waitFor(
+      async () => evalInPage("!!document.querySelector('#app-content')"),
+      { label: "4-digit unlock", timeout: 15000 },
+    ).catch(() => false);
+    record(
+      "9. 4 位 PIN：点阵 4 个并且能解开（老用户不会被默认值改动挡住）",
+      fourState === 4 && fourUnlocked === true,
+      `dots=${fourState} unlocked=${fourUnlocked}`,
     );
   } catch (error) {
     console.error(`\nharness error: ${error?.message || error}`);

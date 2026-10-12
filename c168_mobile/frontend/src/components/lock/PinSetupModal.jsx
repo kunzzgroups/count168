@@ -7,7 +7,7 @@ import {
 } from "../../lib/biometricStore.js";
 import { registerDeviceToken, revokeDeviceToken } from "../../lib/deviceTokenApi.js";
 import { PIN_LENGTHS, createPin, readPinSettings } from "../../lib/pinStore.js";
-import { pinText } from "../../translateFile/pinTranslate.js";
+import { pinFormat, pinText } from "../../translateFile/pinTranslate.js";
 import PinPad from "./PinPad.jsx";
 
 /**
@@ -193,6 +193,7 @@ export function PinSetupPanel({
               type="button"
               className={`pin-setup__length${len === value ? " is-on" : ""} tap-scale`}
               aria-pressed={len === value}
+              aria-label={pinFormat(t.lenAria, { len: value })}
               onClick={() => {
                 setLen(value);
                 reset();

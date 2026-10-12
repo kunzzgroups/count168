@@ -15,9 +15,10 @@
  * Everything else is the real code: real localStorage, real WebCrypto (PBKDF2 + AES-GCM),
  * real `pinStore`, real gate, real keypad.
  *
- *   /dev-harness/pin-lock.html          → PIN-only device (no biometric credential at all)
- *   /dev-harness/pin-lock.html?bio=1    → both available (biometric card, PIN as the fallback)
- *   &pin=4821&len=4                     → the PIN the harness enrols
+ *   /dev-harness/pin-lock.html              → PIN-only device (no biometric credential at all)
+ *   /dev-harness/pin-lock.html?bio=1        → both available (biometric card, PIN as the fallback)
+ *   ?setup=1                                → only the "set up PIN" modal
+ *   ?pin=4821&len=4                         → enrol a 4-digit PIN instead of the default 6
  */
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -31,8 +32,10 @@ import "../src/styles/login.css";
 import "../src/index.css";
 
 const params = new URLSearchParams(location.search);
-const PIN = params.get("pin") || "4821";
-const LEN = Number(params.get("len") || 4);
+/** 默认种子就是产品的默认位数（6 位，见 lib/pinStore.js 的 PIN_LENGTHS），
+ *  这样“锁屏按几位出点阵”跟着默认值一起被测到。 */
+const PIN = params.get("pin") || "482917";
+const LEN = Number(params.get("len") || PIN.length);
 const WITH_BIOMETRIC = params.get("bio") === "1";
 /** 只挂「设置 PIN」的弹窗（见下面 SetupHarness 的说明） */
 const SETUP_ONLY = params.get("setup") === "1";

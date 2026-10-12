@@ -7,6 +7,9 @@
 
 状态：已实现（纯前端）。涉及文件见 §6。
 
+位数：**默认 6 位，4 位可选**（`lib/pinStore.js` 的 `PIN_LENGTHS = [6, 4]`，
+**第一项即设置界面的初始选中值**；改默认只改这个数组的顺序，不要另处再写一个数字）。
+
 ---
 
 ## 1. 一句话设计
@@ -44,6 +47,8 @@ device_token ──────────────────────�
 **只设了 PIN 的用户冷启动后完全没有门禁**（`loadToken()` 是 null）。
 
 ## 3. 失败与生命周期
+
+位数默认 6（见开头）；下面所有重试/清空策略与位数无关。
 
 | 情况 | 行为 | 为什么 |
 |---|---|---|
@@ -124,21 +129,22 @@ PIN 与指纹/人脸**共用同一张设备令牌**（服务端 `device_token`�
   而 PIN 用户在此之上还多了一层“明文不落地”。
 - 要真正抬高上限，只能上原生：Keystore 键 + `setUserAuthenticationRequired(true)`
   （把尝试次数交给系统锁定），需要**重新打 APK**，不在本次（纯 Web）范围内。
-- 后续可选项：把默认位数改成 6 位（把穷举成本 ×100）、或把密文改存
-  SecureStorage —— 两者都只是量变，不是质变。
+- 默认位数已按产品要求定为 **6 位**（穷举成本是 4 位的 100 倍）；4 位仍可选，
+  但不建议作为默认 —— 改默认只需改 `PIN_LENGTHS` 的顺序。
+- 还可以做的量变：把密文改存 SecureStorage、把 PBKDF2 迭代调大。都不是质变。
 
 ## 8. 验证
 
 ```bash
 cd c168_mobile/frontend
-node scripts/test-pin-unlock.mjs                      # 16/16：加解密、失败计数、坏记录、位数
+node scripts/test-pin-unlock.mjs                      # 17/17：默认位数、加解密、失败计数、坏记录
 npm run dev -- --port 5174 --strictPort               # 另开一个 shell
 CHROME_PATH="C:/Program Files/Google/Chrome/Application/chrome.exe" \
-  node dev-harness/pin-lock-loop.mjs --shots=1        # 14/14：锁屏三态、错码、连错清 PIN、设置弹窗
+  node dev-harness/pin-lock-loop.mjs --shots=1        # 15/15：锁屏三态、错码、连错清 PIN、设置弹窗、4 位仍可解
 ```
 
-`dev-harness/pin-lock.html` 也可以直接手动打开看（`?bio=1` 模拟“同时有指纹”，
-`?setup=1` 只看设置 PIN 的弹窗）。harness 只伪造两件事：原生桥、`device_login_api.php`；
+`dev-harness/pin-lock.html` 也可以直接手动打开看：`?bio=1` 模拟“同时有指纹”，
+`?setup=1` 只看设置 PIN 的弹窗，`?pin=4821&len=4` 看 4 位 PIN 的锁屏。harness 只伪造两件事：原生桥、`device_login_api.php`；
 PIN 的加解密、localStorage、门禁与键盘都是真代码。
 
 真机上仍需人工确认（浏览器给不了）：系统生物识别弹窗时序、Keystore 失效场景、

@@ -46,8 +46,16 @@ export const PIN_KEY = "ec_pin_unlock";
 /** 失败计数（单独一个键：它属于“这一次猜的过程”，不属于 PIN 本身） */
 export const PIN_FAIL_KEY = "ec_pin_fails";
 
-/** 允许的位数。产品要求 4 位或 6 位，由用户在设置时自选。 */
-export const PIN_LENGTHS = [4, 6];
+/**
+ * 允许的位数，由用户在设置时自选。
+ *
+ * ⚠️ **顺序即默认**（第一项是设置界面的初始选中值）：产品定为 **6 位**。
+ * 理由不是“好看”：4 位只有 1 万种组合，密文在本机、PBKDF2 拖不住有算力的
+ * 攻击者（量级是秒），6 位把穷举成本拉到 100 倍 —— 仍然不是质变，
+ * 但这是不改原生代码就能拿到的最便宜的一档（见 docs/mobile-pin-unlock.md §7）。
+ * 4 位仍**可选**：老用户习惯、以及顺手就能改的场合不该被堵死。
+ */
+export const PIN_LENGTHS = [6, 4];
 
 /**
  * 连错到这个次数就**清掉 PIN**，强制回密码登录。
@@ -220,6 +228,7 @@ export function normalizePinSettings(raw) {
     typeof raw?.ct === "string" &&
     raw.ct.length > 0;
 
+  // 残缺记录：enabled=false，位数给默认值（反正界面只会用它当“没设过”的展示）
   if (!complete || !len) return { v: VERSION, enabled: false, len: len || PIN_LENGTHS[0] };
 
   return {

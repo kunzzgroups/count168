@@ -289,7 +289,11 @@
 .pin-setup__lengths {
   display: flex;
   gap: 8px;
-  margin-bottom: 6px;
+  /* 宽度必须给足并居中：父级是 align-items:center 的列，容器宽度会变成
+     “内容宽”，两个按钮等分之后“4 位”会被挤成两行（截图里拍到了）。 */
+  width: 100%;
+  max-width: 264px;
+  margin: 0 auto 6px;
 }
 
 .pin-setup__length {
@@ -297,8 +301,8 @@
      “4 位”比“6 位”窄一截，看着像两个不同尺寸的控件。 */
   flex: 1 1 0;
   min-width: 0;
-  max-width: 132px;
   padding: 8px 14px;
+  white-space: nowrap;
   border: 1px solid rgba(13, 96, 255, 0.35);
   border-radius: 999px;
   background: transparent;

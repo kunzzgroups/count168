@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { PIN_LENGTHS } from "../../lib/pinStore.js";
 import { pinFormat, pinText } from "../../translateFile/pinTranslate.js";
 
 /**
@@ -26,7 +27,8 @@ import { pinFormat, pinText } from "../../translateFile/pinTranslate.js";
  */
 export default function PinPad({ len, busy = false, error = "", hint = "", onSubmit, lang, testId = "pin" }) {
   const t = pinText(lang);
-  const length = Number(len) > 0 ? Number(len) : 4;
+  // 位数非法时的兜底就是产品默认值，不另写一个数字（写过 4，改默认时会漏掉）
+  const length = Number(len) > 0 ? Number(len) : PIN_LENGTHS[0];
   const [value, setValue] = useState("");
   const [shake, setShake] = useState(false);
   /** 防止“输满的那一下”与上一次提交并发（慢速设备上 PBKDF2 要几百毫秒） */

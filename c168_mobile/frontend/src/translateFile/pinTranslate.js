@@ -35,13 +35,17 @@ export const PIN_I18N = {
 
     // ── 设置 / 引导（同一个键盘组件）─────────────────────────
     setupTitle: "Set up PIN unlock",
+    // 6 位在前：界面上的默认值就是 6 位（见 lib/pinStore.js 的 PIN_LENGTHS），
+    // 文案顺序跟着默认走，否则用户会以为我们推荐 4 位。
     setupBody:
-      "Choose 4 or 6 digits. You will use this PIN to unlock EazyCount on this device — for example when a fingerprint is not recognised.",
+      "Choose 6 digits (or 4 if you prefer). You will use this PIN to unlock EazyCount on this device — for example when a fingerprint is not recognised.",
     setupBodyNoBiometric:
       "This phone has no fingerprint or face set up for apps. A PIN still lets you open EazyCount without typing your full password.",
     setupLength: "PIN length",
     len4: "4 digits",
     len6: "6 digits",
+    /** 位数选择按钮的读屏文案（按钮本身只显示“6 位”） */
+    lenAria: "Use a {len}-digit PIN",
     setupEnter: "Enter your new PIN",
     setupConfirm: "Enter it again to confirm",
     setupMismatch: "The two PINs do not match. Please start again.",
@@ -89,12 +93,13 @@ export const PIN_I18N = {
     // ── 设置 / 引导 ─────────────────────────────────────────
     setupTitle: "设置 PIN 解锁",
     setupBody:
-      "选 4 位或 6 位数字。以后用这个 PIN 就能在本机解锁 EazyCount —— 比如指纹没认出来的时候。",
+      "默认 6 位，也可以选 4 位。以后用这个 PIN 就能在本机解锁 EazyCount —— 比如指纹没认出来的时候。",
     setupBodyNoBiometric:
       "这台手机里没有可供 App 使用的指纹或人脸。设一个 PIN，同样不用每次输完整密码就能进入。",
     setupLength: "PIN 位数",
     len4: "4 位",
     len6: "6 位",
+    lenAria: "改用 {len} 位 PIN",
     setupEnter: "输入新的 PIN",
     setupConfirm: "再输入一次确认",
     setupMismatch: "两次输入不一致，请重新设置。",

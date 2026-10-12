@@ -45,6 +45,7 @@ globalThis.localStorage = new MemoryStorage();
 
 const {
   PIN_KEY,
+  PIN_LENGTHS,
   PIN_MAX_ATTEMPTS,
   createPin,
   isPinSupported,
@@ -85,6 +86,11 @@ await check("运行环境支持 WebCrypto（否则功能应当整个关掉）", 
   assert.equal(isPinSupported(), true);
 });
 
+await check("默认位数 = 6（PIN_LENGTHS 的顺序即默认；4 位仍可选）", () => {
+  assert.equal(PIN_LENGTHS[0], 6, "设置界面初始选中项就是第一项");
+  assert.deepEqual([...PIN_LENGTHS].sort(), [4, 6], "4 位必须还在选项里");
+});
+
 await check("位数只接受 4 / 6", () => {
   assert.equal(isValidPinFormat("1234", 4), true);
   assert.equal(isValidPinFormat("123456", 6), true);
@@ -114,18 +120,18 @@ await check("残缺记录一律当成“没设过”（绝不猜）", () => {
 
 await check("没有记录时读出来是关闭状态", () => {
   reset();
-  assert.deepEqual(readPinSettings(), { v: 1, enabled: false, len: 4 });
+  assert.deepEqual(readPinSettings(), { v: 1, enabled: false, len: 6 });
   assert.equal(pinEnabled(), false);
 });
 
 await check("创建 + 正确 PIN 解出同一张令牌（校验与取令牌是同一个动作）", async () => {
   reset();
-  const created = await createPin({ pin: "4821", len: 4, token: TOKEN });
+  const created = await createPin({ pin: "482917", len: 6, token: TOKEN });
   assert.deepEqual(created, { ok: true });
   assert.equal(pinEnabled(), true);
-  assert.equal(readPinSettings().len, 4);
+  assert.equal(readPinSettings().len, 6);
 
-  const opened = await unlockWithPin({ pin: "4821" });
+  const opened = await unlockWithPin({ pin: "482917" });
   assert.equal(opened.ok, true);
   assert.equal(opened.token, TOKEN);
   // 解出来的令牌一定是规范化的小写 hex（服务端比较时不分大小写这里先统一）
