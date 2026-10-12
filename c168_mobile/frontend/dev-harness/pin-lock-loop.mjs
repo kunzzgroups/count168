@@ -178,7 +178,10 @@ async function main() {
       );
       // harness 先播种（PBKDF2 要跑一下）再挂载
       await waitFor(
-        async () => evalInPage("!!document.querySelector('.bio-lock, #app-content, #harness-loading')"),
+        async () =>
+          evalInPage(
+            "!!document.querySelector('.bio-lock, #app-content, #harness-loading, [data-testid=\"pin-setup\"]')",
+          ),
         { label: "harness mount", timeout: 25000 },
       );
     };
@@ -243,6 +246,8 @@ async function main() {
         })()`),
       { label: "PIN error text" },
     );
+    // 等一下再读：清空与报错是同一批状态更新，但截图/读 DOM 太快会拍到中间帧
+    await sleep(500);
     const afterWrong = JSON.parse(
       await evalInPage(`JSON.stringify({
         filled: Number(document.querySelector('[data-testid="bio-lock-pin-dots"]').dataset.filled),
@@ -314,6 +319,113 @@ async function main() {
     const backToBio = await evalInPage("!!document.querySelector('[data-testid=\"bio-lock-use-biometric\"]')");
     record("6. 点「用 PIN 解锁」→ 出键盘，且能回生物识别", padAfterTap === true && backToBio === true);
     await shot("pin-lock-pad-from-bio.png");
+
+    // ── 7. 连错 5 次：PIN 被清掉，界面自动收回键盘并只剩密码这条路 ─────
+    console.log("too many wrong PINs");
+    await goto(BASE);
+    await waitFor(async () => evalInPage("!!document.querySelector('[data-testid=\"bio-lock-pin-pad\"]')"), {
+      label: "PIN pad (locked-out check)",
+    });
+    for (let i = 0; i < 5; i += 1) {
+      await typePin("0001");
+      await sleep(450);
+    }
+    const afterLockout = await waitFor(
+      async () =>
+        evalInPage(`(() => {
+          const card = document.querySelector('.bio-lock__card');
+          if (!card) return false;
+          const text = card.innerText || '';
+          return text.includes('turned off') ? text : false;
+        })()`),
+      { label: "locked-out message", timeout: 10000 },
+    ).catch(() => false);
+    const lockoutState = JSON.parse(
+      await evalInPage(`JSON.stringify({
+        pad: !!document.querySelector('[data-testid="bio-lock-pin-pad"]'),
+        loginBtn: !!document.querySelector('[data-testid="bio-lock-back-to-login"]'),
+        app: !!document.querySelector('#app-content'),
+        pinRecord: localStorage.getItem('ec_pin_unlock')
+      })`),
+    );
+    record(
+      "7. 连错 5 次 → PIN 被清、键盘收回、只剩登录（且仍未放行）",
+      lockoutState.pad === false &&
+        lockoutState.loginBtn === true &&
+        lockoutState.app === false &&
+        lockoutState.pinRecord === null,
+      `${JSON.stringify(lockoutState)} msg=${JSON.stringify(afterLockout)}`,
+    );
+    await shot("pin-lock-locked-out.png");
+
+    // ── 8. 设置 PIN 的弹窗（两轮输入 + 4/6 位切换）─────────────────────
+    console.log("set-up-PIN modal");
+    await goto(`${BASE}?setup=1`);
+    await waitFor(async () => evalInPage("!!document.querySelector('[data-testid=\"pin-setup\"]')"), {
+      label: "PIN setup modal",
+    });
+    const setupInitial = JSON.parse(
+      await evalInPage(`JSON.stringify({
+        dots: document.querySelectorAll('[data-testid="pin-setup-dots"] .bio-pin__dot').length,
+        cancel: !!document.querySelector('[data-testid="pin-setup-cancel"]'),
+        overflow: document.documentElement.scrollHeight > window.innerHeight,
+        cancelVisible: (() => {
+          const el = document.querySelector('[data-testid="pin-setup-cancel"]');
+          if (!el) return false;
+          const r = el.getBoundingClientRect();
+          return r.top >= 0 && r.bottom <= window.innerHeight;
+        })()
+      })`),
+    );
+    record(
+      "8. 弹窗默认 4 位，取消按钮在小屏（390×844）上看得到",
+      setupInitial.dots === 4 && setupInitial.cancel === true && setupInitial.cancelVisible === true,
+      `${JSON.stringify(setupInitial)}（overflow=页面高于视口，弹窗内可滚动）`,
+    );
+
+    await tap("pin-setup-len-6");
+    const sixDots = await evalInPage(
+      `document.querySelectorAll('[data-testid="pin-setup-dots"] .bio-pin__dot').length`,
+    );
+    record("8b. 切到 6 位 → 点阵变 6 个", sixDots === 6, `dots=${sixDots}`);
+    await shot("pin-setup-6.png");
+
+    const typeSetupPin = async (pin) => {
+      for (const digit of pin) {
+        await tap(`pin-setup-key-${digit}`);
+        await sleep(50);
+      }
+      await sleep(150);
+    };
+
+    // 两次不一致 → 回到第一轮并说明原因，绝不能提交
+    await typeSetupPin("908171");
+    await typeSetupPin("908172");
+    const mismatch = await waitFor(
+      async () =>
+        evalInPage(
+          "document.querySelector('[data-testid=\"pin-setup-pad\"] .bio-pin__status')?.textContent?.trim() || ''",
+        ),
+      { label: "mismatch text" },
+    );
+    const submittedAfterMismatch = await evalInPage("!!window.__setupResult");
+    record(
+      "8c. 两次不一致 → 报错、不提交",
+      Boolean(mismatch) && submittedAfterMismatch === false,
+      `msg=${JSON.stringify(mismatch)} submitted=${submittedAfterMismatch}`,
+    );
+
+    // 两次一致 → 交给调用方（真机上是签发令牌 + 加密保存）
+    await typeSetupPin("908171");
+    await typeSetupPin("908171");
+    const submitted = await waitFor(async () => evalInPage("JSON.stringify(window.__setupResult || null)"), {
+      label: "setup submit",
+    });
+    record(
+      "8d. 两次一致 → 交出 (pin, len)",
+      submitted === JSON.stringify({ pin: "908171", len: 6 }),
+      submitted,
+    );
   } catch (error) {
     console.error(`\nharness error: ${error?.message || error}`);
     process.exitCode = 2;

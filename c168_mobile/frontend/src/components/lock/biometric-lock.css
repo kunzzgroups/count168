@@ -293,7 +293,11 @@
 }
 
 .pin-setup__length {
-  min-width: 96px;
+  /* 两个选项**等宽**：不写 flex 的话宽度跟着文字走，
+     “4 位”比“6 位”窄一截，看着像两个不同尺寸的控件。 */
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 132px;
   padding: 8px 14px;
   border: 1px solid rgba(13, 96, 255, 0.35);
   border-radius: 999px;

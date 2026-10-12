@@ -41,6 +41,8 @@ const TEXT = {
   zh: {
     verifying: "正在验证…",
     lockedTitle: "生物识别解锁",
+    /** 既没生物识别凭据也没 PIN 时（例如连错被清之后）——标题不能再说“生物识别” */
+    neutralTitle: "解锁 EazyCount",
     lockedHint: "请验证身份以解锁 EazyCount",
     retry: "重试",
     usePassword: "用密码登录",
@@ -52,26 +54,27 @@ const TEXT = {
     nothingEnrolled: "这台手机还没有录入任何可供 App 使用的指纹或人脸，请先在系统设置里添加一个。",
     switchToFace: "改用人脸",
     switchToFingerprint: "改用指纹",
-    tooMany: "多次未能识别。可以直接用密码登录。",
+    tooMany: "多次未能识别。可以改用其它解锁方式。",
     tryLater: "暂时无法验证，请稍后重试",
     // 按具体原因给可操作的提示 ——「暂时不可用」这种话帮不了用户
     byCode: {
-      biometryLockout: "系统已临时锁定生物识别（失败次数过多）。请用密码登录，或稍后再试。",
+      biometryLockout: "系统已临时锁定生物识别（失败次数过多）。请稍后再试，或改用其它解锁方式。",
       authenticationFailed: "未能识别，请重试。",
-      userCancel: "已取消。可重新尝试，或改用密码登录。",
+      userCancel: "已取消，可以重试。",
       systemCancel: "系统中断了验证，请重试。",
       appCancel: "验证被中断，请重试。",
-      userFallback: "你选择了其它方式，请用密码登录。",
+      userFallback: "你选择了其它方式，请改用 PIN 或密码登录。",
       TOKEN_INVALID: "此设备已失效，请重新登录。",
       TOKEN_EXPIRED: "此设备已失效，请重新登录。",
       TOKEN_REVOKED: "此设备的生物识别解锁已关闭，请重新登录。",
-      MAINTENANCE: "系统维护中，请稍后再试或改用密码登录。",
+      MAINTENANCE: "系统维护中，请稍后再试，或改用其它解锁方式。",
       SERVER_ERROR: "暂时连不上服务器，请稍后重试。",
     },
   },
   en: {
     verifying: "Verifying…",
     lockedTitle: "Biometric Unlock",
+    neutralTitle: "Unlock EazyCount",
     lockedHint: "Unlock EazyCount with biometrics",
     retry: "Try again",
     usePassword: "Use password",
@@ -83,20 +86,20 @@ const TEXT = {
       "No fingerprint or face is set up for apps on this phone. Add one in your phone's settings first.",
     switchToFace: "Use face instead",
     switchToFingerprint: "Use fingerprint instead",
-    tooMany: "Several attempts failed. You can sign in with your password instead.",
+    tooMany: "Several attempts failed. You can use another unlock method instead.",
     tryLater: "Temporarily unavailable, please try again",
     byCode: {
       biometryLockout:
-        "Biometrics are temporarily locked after too many attempts. Use your password, or try again shortly.",
+        "Biometrics are temporarily locked after too many attempts. Try again shortly, or use another unlock method.",
       authenticationFailed: "Not recognised. Please try again.",
-      userCancel: "Cancelled. You can try again, or use your password.",
+      userCancel: "Cancelled. You can try again.",
       systemCancel: "The system interrupted verification. Please try again.",
       appCancel: "Verification was interrupted. Please try again.",
-      userFallback: "You chose another method. Please use your password.",
+      userFallback: "You chose another method. Please use your PIN or password.",
       TOKEN_INVALID: "This device is no longer signed in.",
       TOKEN_EXPIRED: "This device is no longer signed in.",
       TOKEN_REVOKED: "Biometric unlock was turned off for this device. Please login again.",
-      MAINTENANCE: "System under maintenance. Try again later, or use your password.",
+      MAINTENANCE: "System under maintenance. Try again later, or use another unlock method.",
       SERVER_ERROR: "Cannot reach the server right now. Please try again.",
     },
   },
@@ -318,7 +321,13 @@ export default function BiometricLockGate({ children }) {
   const backToLogin = () => (pin.enabled ? loginButton(false, tp.backToLogin) : null);
 
   const cardIcon = isChecking ? "fas fa-spinner fa-spin" : bioCredential ? lockIcon(method) : "fas fa-key";
-  const cardTitle = !bioCredential && pin.enabled ? tp.pinTitle : t.lockedTitle;
+  /**
+   * 卡片标题必须与**这张卡现在在做什么**一致：
+   *   有生物识别凭据 → 生物识别
+   *   只有 PIN        → PIN
+   *   两样都没了（连错被清 / 凭据废了）→ 中性标题，不能再写“生物识别”
+   */
+  const cardTitle = bioCredential ? t.lockedTitle : pin.enabled ? tp.pinTitle : t.neutralTitle;
   /** 没有生物识别凭据、但有 PIN：整张卡就是 PIN 卡，说明直接说 PIN */
   const cardHint = !bioCredential && pin.enabled && !failure ? pinFormat(tp.pinHint, { len: pin.len }) : hint;
 

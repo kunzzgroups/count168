@@ -24,6 +24,7 @@ import { createRoot } from "react-dom/client";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { BiometricAuth, BiometryType } from "@aparajita/capacitor-biometric-auth";
 import BiometricLockGate from "../src/components/lock/BiometricLockGate.jsx";
+import { PinSetupModal } from "../src/components/lock/PinSetupModal.jsx";
 import { clearPin, createPin } from "../src/lib/pinStore.js";
 import "../src/styles/tokens.css";
 import "../src/styles/login.css";
@@ -33,6 +34,8 @@ const params = new URLSearchParams(location.search);
 const PIN = params.get("pin") || "4821";
 const LEN = Number(params.get("len") || 4);
 const WITH_BIOMETRIC = params.get("bio") === "1";
+/** 只挂「设置 PIN」的弹窗（见下面 SetupHarness 的说明） */
+const SETUP_ONLY = params.get("setup") === "1";
 
 /** 64 hex —— 与 includes/device_token.php 里签发的形状一致 */
 const DEVICE_TOKEN = "b".repeat(64);
@@ -87,6 +90,31 @@ function Hud() {
   );
 }
 
+/**
+ * 只挂设置 PIN 的弹窗（设置页那一个）。
+ *
+ * 它只有在原生壳里、登录之后才能打开，所以离开这个 harness 就看不到 ——
+ * 而它比原来的弹窗高得多（多了整张键盘），小屏上「取消」会不会被挤出屏是必须看的。
+ */
+function SetupHarness() {
+  return (
+    <PinSetupModal
+      open
+      mode="set"
+      busy={false}
+      error=""
+      lang="zh"
+      onSubmit={(pin, len) => {
+        // 给 CDP 循环读的落点：真机上这一步是“签发令牌 + 加密存起来”
+        window.__setupResult = { pin, len };
+      }}
+      onClose={() => {
+        window.__setupClosed = true;
+      }}
+    />
+  );
+}
+
 function Harness() {
   const [ready, setReady] = useState(false);
 
@@ -123,6 +151,7 @@ function Harness() {
   }, []);
 
   if (!ready) return <div id="harness-loading">seeding…</div>;
+  if (SETUP_ONLY) return <SetupHarness />;
 
   return (
     <MemoryRouter initialEntries={["/dashboard"]}>

@@ -126,7 +126,12 @@ export default function SettingsPage() {
   const [pinBusy, setPinBusy] = useState(false);
   const [pinNotice, setPinNotice] = useState("");
   const pinOn = pinSetup.state.enabled;
-  const pinSupported = useMemo(() => isPinSupported(), []);
+  /**
+   * PIN **只在原生壳里**有意义：网页端根本不走启动门禁（那边是 passkey / 保持登录），
+   * 在这一侧让用户设一个永远用不上的 PIN，比不给这个开关更糟。
+   * 所以这里跟锁屏的判据保持一致：isNative()。
+   */
+  const pinSupported = useMemo(() => isNative() && isPinSupported(), []);
 
   const setLang = useCallback((next) => {
     setLangState(writeLoginLang(next));
@@ -594,6 +599,7 @@ export default function SettingsPage() {
            * 开关本身只表示“开/关”，不写多余说明（与生物识别那一行保持一致），
            * 只额外给一句“几位数”，因为改位数要重新设置。
            */}
+          {pinSupported ? (
           <section className="m-more-settings-group" aria-label={tp.settingLabel}>
             <div className="m-more-settings-row">
               <span>{tp.settingLabel}</span>
@@ -612,7 +618,6 @@ export default function SettingsPage() {
                 ) : (
                   <MobileOnOffSwitch
                     on={pinOn}
-                    disabled={!pinSupported}
                     onChange={(next) => {
                       setPinNotice("");
                       if (next) pinSetup.openSetup(pinOn ? "change" : "set");
@@ -632,9 +637,7 @@ export default function SettingsPage() {
               </p>
             ) : null}
 
-            {/* 设备根本不支持（没有 WebCrypto）——宁可说清楚，也不降级成弱存储 */}
-            {!pinSupported ? <p className="m-more-settings-hint">{tp.setupNoCrypto}</p> : null}
-
+            {/* 开启生物识别把 PIN 顶掉时的一句说明（不是报错，是取舍） */}
             {pinNotice ? <p className="m-more-settings-hint">{pinNotice}</p> : null}
 
             {pinSetup.error && !pinSetup.open ? (
@@ -643,6 +646,7 @@ export default function SettingsPage() {
               </p>
             ) : null}
           </section>
+          ) : null}
 
           <PinSetupModal
             open={pinSetup.open}

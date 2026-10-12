@@ -58,15 +58,23 @@ export default function PinPad({ len, busy = false, error = "", hint = "", onSub
   const push = useCallback(
     (digit) => {
       if (busy || submitting.current) return;
-      setValue((prev) => {
-        if (prev.length >= length) return prev;
-        const next = prev + digit;
-        if (next.length === length) void submit(next);
-        return next;
-      });
+      setValue((prev) => (prev.length >= length ? prev : prev + digit));
     },
-    [busy, length, submit],
+    [busy, length],
   );
+
+  /**
+   * 输满自动提交。
+   *
+   * ⚠️ 必须放在 effect 里，**不能**写在 setValue 的更新函数里。
+   * 更新函数是渲染阶段跑的纯函数：React 在开发模式会重跑它（StrictMode），
+   * 而里面一旦发起提交（异步、几百毫秒），就会和随后的 setValue("") 交错，
+   * 结果点阵停在“半输完”的样子 —— dev-harness 的截图里就拍到过 4 位输入却只亮 3 个点。
+   */
+  useEffect(() => {
+    if (value.length !== length) return;
+    void submit(value);
+  }, [value, length, submit]);
 
   const back = useCallback(() => {
     if (busy) return;
@@ -145,7 +153,9 @@ export default function PinPad({ len, busy = false, error = "", hint = "", onSub
           aria-label={t.keyDelete}
           data-testid={`${testId}-key-del`}
         >
-          <i className="fas fa-delete-left" aria-hidden="true" />
+          {/* 用字符而不是 Font Awesome 图标：图标字体加载失败时，
+              这一格会变成**看不见但能点**的按钮 —— 用户会以为键盘坏了一格。 */}
+          <span aria-hidden="true">⌫</span>
         </button>
       </div>
     </div>
