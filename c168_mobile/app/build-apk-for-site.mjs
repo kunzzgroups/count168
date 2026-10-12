@@ -3,7 +3,8 @@
 // 用法（在 c168_mobile/app 下）：
 //   npm i                 # 首次：装 @capacitor/cli 等
 //   node build-apk-for-site.mjs site|org|com
-//   node build-apk-for-site.mjs com --diag   # 内部诊断包：开 WebView 远程调试（chrome://inspect）
+//   node build-apk-for-site.mjs com --diag          # 内部诊断包：开 WebView 远程调试（chrome://inspect）
+//   node build-apk-for-site.mjs com --stamp=1.5.1-test   # 测试包：版本号可辨识（装到手机上能确认是哪一版）
 //
 // `--diag` 会把 `android.webContentsDebuggingEnabled` 置为 true，用来给“App 内 WebView 卡”
 // 这种壳层问题做真机 Performance 录制（见 docs/mobile-android-ime-input.md）。
@@ -31,6 +32,11 @@ const appUrl = (host) => `https://${host}/c168_mobile/frontend/dist/`;
 const here = path.dirname(fileURLToPath(import.meta.url));
 const key = String(process.argv[2] || "").toLowerCase();
 const diag = process.argv.includes("--diag");
+/* `--stamp=<name>`: build a test APK whose version is recognisable on the phone (Settings → Apps) and
+   in the in-page diagnostics panel. Applied to build.gradle only for the duration of the build, so the
+   repo keeps the real release version. Without it, a test APK is indistinguishable from the release one. */
+const stampArg = process.argv.find((a) => a.startsWith("--stamp="));
+const stamp = stampArg ? stampArg.slice("--stamp=".length) : null;
 const host = SITES[key];
 if (!host) {
   console.error("用法: node build-apk-for-site.mjs site|org|com [--diag]");
@@ -39,8 +45,21 @@ if (!host) {
 
 const cfgPath = path.join(here, "capacitor.config.json");
 const wwwPath = path.join(here, "www", "index.html");
+const gradlePath = path.join(here, "android", "app", "build.gradle");
 const originalCfg = fs.readFileSync(cfgPath, "utf8");
 const originalWww = fs.readFileSync(wwwPath, "utf8");
+const originalGradle = fs.readFileSync(gradlePath, "utf8");
+
+// 1b) 给测试包打上可识别的版本号（versionCode 同步 +1，否则同机覆盖安装会被拒）
+if (stamp) {
+  fs.writeFileSync(
+    gradlePath,
+    originalGradle
+      .replace(/versionCode\s+(\d+)/, (m, n) => `versionCode ${Number(n) + 1}`)
+      .replace(/versionName\s+"[^"]*"/, `versionName "${stamp}"`),
+  );
+  console.warn(`\n!! TEST BUILD: version ${stamp} — internal testing only, do not ship.\n`);
+}
 
 // 1) 把 server.url（以及兜底页的重连地址）改成这个域名
 const cfg = JSON.parse(originalCfg);
@@ -103,5 +122,6 @@ try {
   // 2) 还原仓库里的配置，保持工作树干净
   fs.writeFileSync(cfgPath, originalCfg);
   fs.writeFileSync(wwwPath, originalWww);
-  console.log("==> 已还原 capacitor.config.json / www/index.html");
+  fs.writeFileSync(gradlePath, originalGradle);
+  console.log("==> 已还原 capacitor.config.json / www/index.html / build.gradle");
 }

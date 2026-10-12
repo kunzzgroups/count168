@@ -285,6 +285,9 @@ function webViewLine() {
     android: android ? android[1] : null,
     cores: (typeof navigator !== "undefined" && navigator.hardwareConcurrency) || null,
     memoryGb: (typeof navigator !== "undefined" && navigator.deviceMemory) || null,
+    /* First line on purpose: a screenshot has to say which APK produced it (a test build cannot be
+       told apart from the release build any other way). */
+    nativeAppVersion: readNative("appVersion"),
     /* Authoritative values from the shell (MainActivity exposes EazyCountNative). The user-agent
        string cannot tell us *which package* is rendering: this can. */
     nativeWebView: readNative("version"),
@@ -354,10 +357,11 @@ export function readTypingReport() {
 export function formatTypingReport(report) {
   if (!report) return "";
   const lines = [
+    `app: ${report.nativeAppVersion || "(web only, no native bridge)"}` +
+      `${report.commitMode ? ` · commit ${report.commitMode}` : ""}`,
     `webview ${report.chrome ? `Chrome/WebView ${report.chrome}` : "?"}` +
       `${report.android ? ` · Android ${report.android}` : ""}` +
-      `${report.cores ? ` · ${report.cores} cores` : ""}` +
-      `${report.commitMode ? ` · commit ${report.commitMode}` : ""}`,
+      `${report.cores ? ` · ${report.cores} cores` : ""}`,
   ];
   if (report.nativeWebView) {
     /* The decisive line when comparing a laggy phone with a smooth one: which WebView *package* and

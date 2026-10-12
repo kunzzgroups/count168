@@ -73,6 +73,19 @@ public class MainActivity extends BridgeActivity {
                     }
 
                     @JavascriptInterface
+                    public String appVersion() {
+                        /* Which APK is actually installed. Needed because a test build signed with a
+                           different key cannot be told apart from the release build by behaviour alone,
+                           and a screenshot with the version in it ends the guesswork. */
+                        try {
+                            PackageInfo self = getPackageManager().getPackageInfo(getPackageName(), 0);
+                            return self.versionName + " (" + self.versionCode + ")";
+                        } catch (Exception e) {
+                            return "unknown";
+                        }
+                    }
+
+                    @JavascriptInterface
                     public String device() {
                         return "Android " + Build.VERSION.RELEASE + " (sdk " + Build.VERSION.SDK_INT + ")";
                     }
