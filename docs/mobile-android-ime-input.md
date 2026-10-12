@@ -48,19 +48,29 @@
    要归一化就**归一化 state / 提交值**，不要动 DOM：见 `DomainPage` 的 `forceSearchValue`。
 2. **表单字段不要开 `composeThrottleMs`**：提交要读 state，节流会让它慢一拍（登录页/密码框=0）。
 3. 搜索框的列表必须继续**窗口化**（`OPTION_WINDOW_STEP`）：一次挂几千行会让删除卡几秒（已修）。
+4. **登录页打字时不得重渲染**：公司ID/用户名/密码都存在 ref（`useUppercaseField` / `passwordRef`），
+   `onSubmit` 读 `ref.current`；state 只在 blur 时追上（顺便做大写归一化）。
+   理由：每键重渲染整个登录页，在旧机上就是输入法要等的那段时间。
+   改这里必须跑 `login-loop.mjs` 的「submitted body carries exactly what was typed」——
+   它截获登录请求体，证明**最后一个没 blur 的字段**也一字不差地进了请求。
+5. **别在登录页加无限动画**：光晕曾动画 `filter: blur()`、激活文字曾动画 `text-shadow`、扫光曾用
+   `mix-blend-mode`，都是每帧重绘。`body.is-typing`（输入框有焦点时）会把它们全部停掉，
+   但新加的动画也要遵守这个约定。
 
 ## 6. 验证（无需后端）
 
 ```bash
 cd c168_mobile/frontend
 npm run dev -- --port 5174 --strictPort
-node dev-harness/login-loop.mjs      # 真登录页：字存活 / 眼睛开关 / type=password / 删除延迟 / 构建标记
+node dev-harness/login-loop.mjs --throttle=20   # 8 项：字存活 / 眼睛开关 / type=password / 逐次删除延迟 / 构建标记 / 提交体
 npm run dev -- --port 5200 --strictPort   # 另开一个 shell
-node dev-harness/picker-loop.mjs --n=2000 --throttle=6   # 选择器：含"组合突发"与 z-index 劫持
+node dev-harness/picker-loop.mjs --n=2000 --throttle=6   # 13 项：含组合突发与 z-index 劫持
 node dev-harness/search-sweep.mjs    # 其它页面接线（无后端时会如实标 skipped）
 ```
 
-改前对照：把源码改动暂时 stash 掉再跑，`login-loop` 会 5/5 失败（三个字段 `afterRerender` 全变空）。
+`login-loop` 还会报**逐次删除延迟**（按键 → 输入框内容变化）与「关掉全部动画」的对照；
+在模拟 x30 的 CPU 上，攻击线从 304ms → 103ms（逐层修复后）。改前对照：stash 掉源码改动再跑，
+会看到三个字段 `afterRerender` 全变空、删除延迟 300ms 级。
 
 ## 7. 构建标记（判定用户是否拿到新代码）
 

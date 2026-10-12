@@ -60,9 +60,24 @@ const SILENT_PASSKEY_CODES = new Set([
 /** Uppercase display via CSS; keep raw value while typing so caret stays put. */
 function useUppercaseField(initial = "") {
   const [value, setValue] = useState(initial);
+  /**
+   * The text as it is right now. Typing writes **only** this: a keystroke must not re-render the
+   * login page, because on an old phone that render is exactly what the phone's keyboard ends up
+   * waiting for (the reported "backspaces queue up").
+   *
+   * State catches up on blur — which is also where the value gets upper-cased — and `onSubmit` reads
+   * `valueRef.current`, so what is sent is what the user typed and not what React last rendered.
+   */
+  const valueRef = useRef(initial);
+
+  const onValueChange = useCallback((text) => {
+    valueRef.current = String(text ?? "");
+  }, []);
 
   const onBlur = useCallback((e) => {
-    setValue(e.target.value.toUpperCase());
+    const next = e.target.value.toUpperCase();
+    valueRef.current = next;
+    setValue(next);
   }, []);
 
   const onFocus = useCallback((e) => {
@@ -74,6 +89,8 @@ function useUppercaseField(initial = "") {
 
   return {
     value,
+    /** Always current — read this when submitting. */
+    valueRef,
     setValue,
     /*
      * The field is KeyboardOwnedInput: uncontrolled, so React never writes into it while the phone's
@@ -84,7 +101,7 @@ function useUppercaseField(initial = "") {
     fieldProps: {
       value,
       initialValue: value,
-      onValueChange: setValue,
+      onValueChange,
       onBlur,
       onFocus,
       autoCapitalize: "none",
@@ -182,7 +199,11 @@ export default function LoginPage() {
   const userIdField = useUppercaseField("");
   const companyId = companyField.value;
   const userField = userIdField.value;
-  const [password, setPassword] = useState("");
+  /**
+   * The password lives in a ref, not in state: only the submit path needs it, so there is no reason
+   * to re-render this page on every keystroke for it (see `useUppercaseField`).
+   */
+  const passwordRef = useRef("");
   const [rememberMe, setRememberMe] = useState(false);
   const [maintenanceList, setMaintenanceList] = useState([]);
   const [modal, setModal] = useState({ open: false, title: "Notice", message: "" });
@@ -520,13 +541,17 @@ export default function LoginPage() {
     try {
       const fd = new FormData();
       fd.append("action", "login");
-      fd.append("company_id", companyId.toUpperCase().trim());
-      fd.append("password", password);
+      /* Read the fields' current text, not React state: the state only catches up on blur, and the
+         last field the user typed in is never blurred before they tap Sign in. */
+      const companyValue = companyField.valueRef.current;
+      const userValue = userIdField.valueRef.current;
+      fd.append("company_id", companyValue.toUpperCase().trim());
+      fd.append("password", passwordRef.current);
       fd.append("login_role", role);
       if (role === "member") {
-        fd.append("account_id", userField.toUpperCase().trim());
+        fd.append("account_id", userValue.toUpperCase().trim());
       } else {
-        fd.append("login_id", userField.toUpperCase().trim());
+        fd.append("login_id", userValue.toUpperCase().trim());
       }
       // member 也要传：后端已为 member / owner 实现 device_token 记住我
       // （过去只对 user 生效，而前端连字段都不发，member 根本没有记住我）
@@ -558,7 +583,7 @@ export default function LoginPage() {
         sessionStorage.removeItem(LOGIN_ASSET_RETRY_KEY);
         // 记住公司 ID：iOS 钥匙串只有 username + password 两个槽位，
         // 这个第三字段系统不保存，不本地记住的话每次都要手输。
-        writeLastCompanyId(companyId);
+        writeLastCompanyId(companyValue);
         const redirect = String(data.redirect || "").trim();
         if (/owner[-_]secondary[-_]password/i.test(redirect) || redirect === "/owner-secondary-password") {
           navigate("/owner-secondary-password", { replace: true });
@@ -700,8 +725,11 @@ export default function LoginPage() {
                     required
                     autoComplete="current-password"
                     enterKeyHint="go"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
+                    /* no `value` on purpose: typing must not re-render this page (see
+                       useUppercaseField); the submit path reads passwordRef */
+                    onChange={(e) => {
+                      passwordRef.current = e.target.value;
+                    }}
                     showLabel={i18n.showPassword}
                     hideLabel={i18n.hidePassword}
                     onFocus={(e) => {

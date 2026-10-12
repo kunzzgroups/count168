@@ -158,6 +158,35 @@ async function main() {
             for (const e of list.getEntries()) window.__perf.longTasks.push({ t: e.startTime, duration: e.duration });
           }).observe({ entryTypes: ['longtask'] });
         } catch {}
+
+        /* Capture what the form actually submits. The login page keeps the fields' text in refs
+           (typing must not re-render it), so this is what proves the submitted body still carries
+           exactly what the user typed — including the last field, which is never blurred. */
+        window.__posts = [];
+        const realFetch = window.fetch.bind(window);
+        window.fetch = (input, init) => {
+          const url = typeof input === 'string' ? input : (input && input.url) || '';
+          if (url.includes('login_api.php') || url.includes('company/verify_api.php')) {
+            let entries = null;
+            try {
+              const body = init && init.body;
+              entries = body && typeof body.forEach === 'function' ? Object.fromEntries([...body.entries()]) : null;
+            } catch (err) {
+              entries = { error: String(err) };
+            }
+            window.__posts.push({ url, entries });
+            /* Answer with a plain business-level failure: a rejected fetch or a !ok response makes
+               the page reload itself (see tryLoginPageReloadOnce), which would navigate away
+               mid-check. This keeps the app on the "wrong credentials" path. */
+            return Promise.resolve(
+              new Response(JSON.stringify({ status: 'error', message: 'harness: not a real login' }), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' },
+              }),
+            );
+          }
+          return realFetch(input, init);
+        };
       `,
     });
 
@@ -382,6 +411,45 @@ async function main() {
         pressesNeeded,
         valueAfterDeletes,
       },
+    );
+
+    /* ── E) what is submitted is what the user typed (the fields live in refs while typing) ──
+       Typing must not re-render this page, so nothing guarantees the last keystroke reached React
+       state — the submit path has to read the field's current text. The last field the user types in
+       is never blurred before tapping Sign in, which is exactly the case that would break if the
+       submit read state instead. */
+    const CREDENTIALS = { company: "C168", user: "alice", password: "Secret123" };
+    await evalInPage(`(() => {
+      const set = (selector, text) => {
+        const el = document.querySelector(selector);
+        el.focus();
+        el.value = text;
+        el.dispatchEvent(new InputEvent('input', { bubbles: true, isComposing: false, data: text, inputType: 'insertText' }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      };
+      set('#company-id', ${JSON.stringify(CREDENTIALS.company)});
+      set('#user-id', ${JSON.stringify(CREDENTIALS.user)});
+      set('#password', ${JSON.stringify(CREDENTIALS.password)});
+      document.querySelector('button[type="submit"]').click();
+      return true;
+    })()`);
+    await waitFor(() => evalInPage("(window.__posts || []).length > 0"), {
+      label: "login request captured",
+      timeout: 15000,
+    });
+    await sleep(300);
+    const captured = await evalInPage(
+      "(() => { const p = (window.__posts || []).find((x) => x.url.includes('login_api.php')); return p ? p.entries : null; })()",
+    ).catch((err) => ({ error: String(err) }));
+    const sentUser = captured && !captured.error ? captured.login_id || captured.account_id : null;
+    record(
+      "login: the submitted body carries exactly what was typed (last field never blurred)",
+      Boolean(captured) &&
+        !captured.error &&
+        captured.company_id === CREDENTIALS.company.toUpperCase() &&
+        sentUser === CREDENTIALS.user.toUpperCase() &&
+        captured.password === CREDENTIALS.password,
+      { captured, expected: CREDENTIALS },
     );
 
     console.log(JSON.stringify(results, null, 2));
