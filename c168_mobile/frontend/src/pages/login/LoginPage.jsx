@@ -10,6 +10,7 @@ import { extractPlainTextFromRichText } from "../../utils/content/richTextSaniti
 import { isNative } from "../../lib/biometricStore.js";
 import { useBiometricEnrol, BiometricEnrolModal } from "../../components/lock/BiometricEnrolModal.jsx";
 import { readLastCompanyId, writeLastCompanyId } from "../../lib/lastLoginPrefs.js";
+import KeyboardOwnedInput from "../../components/KeyboardOwnedInput.jsx";
 import { onBrandLogoError } from "../../lib/brandAssets.js";
 
 // 登录页 logo：先播拼图动图（webp，54 帧），放完换成静态图。
@@ -57,10 +58,6 @@ const SILENT_PASSKEY_CODES = new Set([
 function useUppercaseField(initial = "") {
   const [value, setValue] = useState(initial);
 
-  const onChange = useCallback((e) => {
-    setValue(e.target.value);
-  }, []);
-
   const onBlur = useCallback((e) => {
     setValue(e.target.value.toUpperCase());
   }, []);
@@ -75,9 +72,16 @@ function useUppercaseField(initial = "") {
   return {
     value,
     setValue,
+    /*
+     * The field is KeyboardOwnedInput: uncontrolled, so React never writes into it while the phone's
+     * keyboard owns the text (that write-back is what made Android users lose characters here —
+     * "打不进去 / 要删一个字才出现"). `value` is only adopted when it changes deliberately (the
+     * prefill, or the blur-time upper-casing below).
+     */
     fieldProps: {
       value,
-      onChange,
+      initialValue: value,
+      onValueChange: setValue,
       onBlur,
       onFocus,
       autoCapitalize: "none",
@@ -616,11 +620,11 @@ export default function LoginPage() {
               <form className="sc-login-form" onSubmit={onSubmit}>
                 <div className="sc-login-input-row">
                   <i className="fas fa-building sc-login-input-icon" />
-                  {/* 字段属性由 useLoginField 统一给（autoCapitalize=none / autoCorrect=off）：
-                      公司代码与用户名都不该被安卓键盘自动大写、自动更正。 */}
-                  <input
+                  {/* 字段属性由 useUppercaseField 统一给（autoCapitalize=none / autoCorrect=off），
+                      并且交给 KeyboardOwnedInput：公司代码与用户名都不该被安卓键盘自动大写、
+                      也不该被 React 在重渲染时回写（那会丢掉刚打的字）。 */}
+                  <KeyboardOwnedInput
                     id="company-id"
-                    type="text"
                     className="sc-login-input"
                     placeholder={i18n.companyPlaceholder}
                     required
@@ -633,10 +637,9 @@ export default function LoginPage() {
 
                 <div className="sc-login-input-row">
                   <i className="fas fa-user sc-login-input-icon" />
-                  {/* 同上（属性同来自 useLoginField）*/}
-                  <input
+                  {/* 同上（属性来自 useUppercaseField + KeyboardOwnedInput）*/}
+                  <KeyboardOwnedInput
                     id="user-id"
-                    type="text"
                     className="sc-login-input"
                     placeholder={userPlaceholder}
                     required

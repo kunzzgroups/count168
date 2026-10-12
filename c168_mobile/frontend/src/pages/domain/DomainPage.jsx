@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import MobileShell from "../../components/layout/MobileShell.jsx";
 import MobileSubpageHeader from "../../components/layout/MobileSubpageHeader.jsx";
+import KeyboardOwnedInput from "../../components/KeyboardOwnedInput.jsx";
 import { useIncrementalList } from "../../hooks/useIncrementalList.js";
 import { useMobileDomain } from "../../hooks/useMobileDomain.js";
 import { forceSearchValue } from "../../lib/domainHelpers.js";
@@ -151,9 +152,11 @@ export default function DomainPage() {
       />
       <label className="m-account-search">
         <i className="fas fa-magnifying-glass" aria-hidden="true" />
-        <input
+        {/* 字段里保留用户实际敲的字符；过滤用的仍是归一化后的值（forceSearchValue），
+            但不再每按一键就回写输入框 —— 那种改写会打断安卓输入法的组合输入（丢字/重复字）。 */}
+        <KeyboardOwnedInput
           value={domain.search}
-          onChange={(e) => domain.setSearch(forceSearchValue(e.target.value))}
+          onValueChange={(text) => domain.setSearch(forceSearchValue(text))}
           placeholder={t("searchPlaceholder")}
         />
       </label>

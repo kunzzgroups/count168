@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import KeyboardOwnedInput from "../KeyboardOwnedInput.jsx";
 import "./subpage-header.css";
 
 /**
@@ -32,22 +33,21 @@ export default function MobileSubpageHeader({
       {hasSearch ? (
         <div className="m-subhead-search">
           <i className="fas fa-magnifying-glass" aria-hidden="true" />
-          <input
+          {/*
+           * Keyboard-owned field: the phone's keyboard writes the text into the DOM itself, and a
+           * controlled `value=` used to put an older string back on the next render — Android users
+           * lost characters and saw a list filtered by an older query. The ✕ is rendered by the
+           * field, so clearing always wipes the DOM as well.
+           */}
+          <KeyboardOwnedInput
             value={search.value}
-            onChange={(e) => search.onChange(e.target.value)}
+            onValueChange={search.onChange}
+            onClear={search.onClear}
             placeholder={search.placeholder || ""}
             inputMode="search"
             enterKeyHint="search"
+            clearLabel={search.clearAriaLabel || "Clear"}
           />
-          {search.value ? (
-            <button
-              type="button"
-              onClick={() => (search.onClear ? search.onClear() : search.onChange(""))}
-              aria-label={search.clearAriaLabel || "Clear"}
-            >
-              <i className="fas fa-xmark" aria-hidden="true" />
-            </button>
-          ) : null}
         </div>
       ) : null}
 

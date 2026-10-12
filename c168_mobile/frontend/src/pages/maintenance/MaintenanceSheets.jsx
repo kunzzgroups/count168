@@ -21,26 +21,22 @@ import {
 } from "../dashboard/FilterSheet.jsx";
 import { MiniSheet } from "../dashboard/FilterChips.jsx";
 import ScopeBreadcrumb from "../dashboard/ScopeBreadcrumb.jsx";
+import KeyboardOwnedInput from "../../components/KeyboardOwnedInput.jsx";
 import "../dashboard/filter-chips.css";
 
 export function MaintenanceSearchBar({ value, onChange, placeholder, clearAriaLabel }) {
   return (
     <label className="m-mt-search">
       <i className="fas fa-magnifying-glass" aria-hidden="true" />
-      <input
+      {/* Keyboard-owned (see components/KeyboardOwnedInput.jsx): Android keyboards write the text
+          into the field themselves, and a controlled `value=` put an older string back on the next
+          render — the list then filtered by a query the user could no longer see. */}
+      <KeyboardOwnedInput
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onValueChange={onChange}
         placeholder={placeholder}
+        clearLabel={clearAriaLabel || "Clear"}
       />
-      {value ? (
-        <button
-          type="button"
-          onClick={() => onChange("")}
-          aria-label={clearAriaLabel || "Clear"}
-        >
-          <i className="fas fa-xmark" aria-hidden="true" />
-        </button>
-      ) : null}
     </label>
   );
 }

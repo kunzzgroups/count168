@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useOverlayLock } from "../../hooks/useOverlayLock.js";
 import { formatLastLogin, normRole, sortAccessItems } from "../../lib/mobileUserAdmin.js";
 import PasswordInput from "../../components/PasswordInput.jsx";
+import KeyboardOwnedInput from "../../components/KeyboardOwnedInput.jsx";
 import "../transaction/add-transaction-sheet.css";
 
 const PERM_LABEL_KEYS = {
@@ -246,7 +247,11 @@ function AccessPickerSheet({
     >
       <label className="m-account-sheet-search">
         <i className="fas fa-magnifying-glass" aria-hidden="true" />
-        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={i18n.searchOptions} />
+        <KeyboardOwnedInput
+          value={query}
+          onValueChange={setQuery}
+          placeholder={i18n.searchOptions}
+        />
       </label>
       <div className="m-admin-picker-bulk">
         <button type="button" className="m-admin-btn" disabled={locked} onClick={() => runBulk(true)}>
@@ -346,7 +351,11 @@ function TenantAssignmentSheet({ open, onClose, admin }) {
     >
       <label className="m-account-sheet-search">
         <i className="fas fa-magnifying-glass" aria-hidden="true" />
-        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={i18n.searchGroupCompany} />
+        <KeyboardOwnedInput
+          value={query}
+          onValueChange={setQuery}
+          placeholder={i18n.searchGroupCompany}
+        />
       </label>
       <div className="m-admin-picker-bulk">
         <button

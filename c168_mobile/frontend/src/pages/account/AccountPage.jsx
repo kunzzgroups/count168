@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import MobileShell from "../../components/layout/MobileShell.jsx";
 import ScopeBreadcrumb from "../dashboard/ScopeBreadcrumb.jsx";
+import KeyboardOwnedInput from "../../components/KeyboardOwnedInput.jsx";
 import { useMobileAccount } from "../../hooks/useMobileAccount.js";
 import { getRoleClass } from "../../lib/transactionPaymentLogic.js";
 import {
@@ -118,9 +119,9 @@ export default function AccountPage() {
       </div>
       <label className="m-account-search">
         <i className="fas fa-magnifying-glass" aria-hidden="true" />
-        <input
+        <KeyboardOwnedInput
           value={account.search}
-          onChange={(e) => account.setSearch(e.target.value)}
+          onValueChange={account.setSearch}
           placeholder={i18n.searchAccounts}
         />
       </label>

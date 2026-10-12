@@ -3,6 +3,7 @@ import { useOverlayLock } from "../../hooks/useOverlayLock.js";
 import { buildAccountScopeDraft } from "../../lib/mobileAccountScope.js";
 import { formatDisplayDate } from "../../lib/dashboardDateUtils.js";
 import PasswordInput from "../../components/PasswordInput.jsx";
+import KeyboardOwnedInput from "../../components/KeyboardOwnedInput.jsx";
 import "../transaction/add-transaction-sheet.css";
 
 /* Same iOS-safe pattern as AddTransactionSheet: visible formatted row,
@@ -545,7 +546,7 @@ export function LinkAccountSheet({ open, onClose, account }) {
       </div>
       <div className="m-account-sheet-search">
         <i className="fas fa-magnifying-glass" aria-hidden="true" />
-        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={i18n.searchAccounts} />
+        <KeyboardOwnedInput value={query} onValueChange={setQuery} placeholder={i18n.searchAccounts} />
       </div>
       <div className="m-account-check-list">
         {rows.map((row) => (

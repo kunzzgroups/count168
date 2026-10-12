@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useOverlayLock } from "../../hooks/useOverlayLock.js";
+import KeyboardOwnedInput from "../../components/KeyboardOwnedInput.jsx";
 import MoneyDecimal from "../../lib/money/moneyDecimal.js";
 import {
   buildClientRequestId,
@@ -194,34 +195,8 @@ function AccountPicker({
   }, [setPanelOpen]);
 
   useEffect(() => {
-    if (!open) return undefined;
-    const input = searchRef.current;
-    if (!input) return undefined;
-
-    /*
-     * The field stays **uncontrolled** on purpose, and is listened to through native listeners:
-     *
-     * - Android keyboards (Gboard) write the composing text into the DOM themselves, out of
-     *   React's sight. A controlled `value=` then writes its own, older string back on the next
-     *   render — the typed characters vanish, the list keeps filtering on something else, and only
-     *   a delete (a fresh event) re-aligns them. Reported as "typing finds nothing until I delete
-     *   a character".
-     * - React de-duplicates an `input` event whose value its own tracker already saw, which is
-     *   exactly what happens after the keyboard wrote the text itself. A native listener always
-     *   receives it, so the list can never lag behind the field.
-     */
-    input.value = "";
-    queryRef.current = "";
-    const onInput = (e) => applyQuery(e.currentTarget.value);
-    const onCompositionEnd = (e) => applyQuery(e.currentTarget.value);
-    input.addEventListener("input", onInput);
-    input.addEventListener("compositionend", onCompositionEnd);
-    input.focus();
-    return () => {
-      input.removeEventListener("input", onInput);
-      input.removeEventListener("compositionend", onCompositionEnd);
-    };
-  }, [open, applyQuery]);
+    if (open) searchRef.current?.focus();
+  }, [open]);
 
   // Escape closes only this panel; the sheet's own Escape handler must not fire with it.
   useEffect(() => {
@@ -279,12 +254,12 @@ function AccountPicker({
 
           <label className="m-tx-account-picker-search">
             <i className="fas fa-magnifying-glass" aria-hidden="true" />
-            {/* Uncontrolled on purpose: React must never write into a field the phone's keyboard
-                owns — see the open effect above. */}
-            <input
-              ref={searchRef}
-              type="text"
-              defaultValue=""
+            {/* Shared component: the field is keyboard-owned (never written back by React) and
+                listened to through native events — see src/components/KeyboardOwnedInput.jsx for
+                the Android report this comes from. */}
+            <KeyboardOwnedInput
+              inputRef={searchRef}
+              onValueChange={applyQuery}
               placeholder={searchPlaceholder}
               autoComplete="off"
               autoCorrect="off"

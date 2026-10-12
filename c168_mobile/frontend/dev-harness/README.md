@@ -1,9 +1,11 @@
 # dev-harness (dev only — not part of the build)
 
 Headless-browser harness for the mobile add-transaction **account picker**
-(`src/pages/transaction/AddTransactionSheet.jsx` → `AccountPicker`). It exists because the repo has no
-test runner and the reported bug (searching an account on a phone, then deleting: "卡着几秒") can only
-be reproduced in a real browser at a phone CPU speed.
+(`src/pages/transaction/AddTransactionSheet.jsx` → `AccountPicker`) and for the **login form**
+(`src/pages/login/LoginPage.jsx`). It exists because the repo has no test runner and these bugs
+(typing on a phone losing characters, deleting after filtering: "卡着几秒") can only be reproduced in
+a real browser at a phone CPU speed. Both screens now use `src/components/KeyboardOwnedInput.jsx`, so
+these checks cover that component too.
 
 Nothing here is bundled: `vite build` only builds `index.html`, so this folder never reaches `dist/`.
 
@@ -14,6 +16,20 @@ cd c168_mobile/frontend
 npm run dev -- --port 5200 --strictPort   # in another shell
 node dev-harness/picker-loop.mjs --n=2000 --throttle=10
 ```
+
+The login form is the one screen that renders without a backend, so the Android *"the keyboard's text
+disappears again"* bug is reproduced on the **real page** there — run the app on 5174 first:
+
+```bash
+npm run dev -- --port 5174 --strictPort
+node dev-harness/login-loop.mjs                      # 5 checks, all 5 fail on the pre-fix code
+node dev-harness/search-sweep.mjs                    # wiring check for the other search boxes
+```
+
+`search-sweep.mjs` walks `/account`, `/maintenance/payment`, `/report/*`, `/more/auto-renew`,
+`/more/domain`. Those pages need a session: without the PHP backend they redirect to `/login` and
+the sweep reports them as `skipped` (never as a pass). Run it with the dev stack up
+(`docs/local-mobile-dev-runbook.md`) to get real readings.
 
 Manual testing in a browser (no backend needed — the account list is mocked):
 
