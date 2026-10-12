@@ -1,7 +1,16 @@
 # 手机版：安卓输入法相关的「丢字 / 删除延迟」通案
 
-> 状态：登录页 + 全站搜索框已修（2026-10-12）；本文记录**这一类**问题的机制与约束，避免再犯。
-> 关联：`components/KeyboardOwnedInput.jsx`、`dev-harness/login-loop.mjs`、`dev-harness/picker-loop.mjs`。
+> **结果（2026-10-12 定案）**：根因是 App 外壳的 `android.captureInput: true` —— 它让 WebView 把
+> `BaseInputConnection`（假编辑器）交给输入法，文字先进它自己的缓冲、再被批量转成伪按键事件送出，
+> 所以删除会“没反应 / 晚几秒”。改成 `false` 后 WebView 恢复用 Chromium 自己的输入连接，问题消失。
+>
+> **下面的 Web 层手段（页面侧交接、诊断面板、lite 模式、非受控备注框等）均已回退**，仅作为排查记录保留：
+> 现网代码里已无 `KeyboardOwnedInput.jsx` / `typingProbe.js` / `liteMode.js` / `compositionCommit.js`，
+> 诊断面板与 `input-test.html` / `input-attrs.html` 也已删除（见提交「frontend: remove the input diagnostics
+> and the IME workarounds」）。**再遇到类似问题时，先确认“输入连接是哪一条”，再考虑页面层。**
+>
+> 历史：登录页 + 全站搜索框曾按本文方案修正（2026-10-12），随后按产品决定回退。
+> 关联（历史）：`components/KeyboardOwnedInput.jsx`、`dev-harness/picker-loop.mjs`。
 
 ## 1. 现象（都是同一类）
 
