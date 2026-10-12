@@ -7,6 +7,7 @@
  *   A) IME / word-mode typing  → search must filter and must not be rewritten
  *   B) delete after filtering  → jank must not grow with the account count
  *   C) opening the picker      → must not freeze while mounting the list
+ *   D) tapping over the panel   → must reach the panel, not the row's hidden date input
  * Zero dependencies: launches Chrome directly and talks CDP over the Node WebSocket.
  */
 import { spawn } from "node:child_process";
@@ -14,10 +15,12 @@ import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+/* Values may contain "=" (URLs): split on the first one only. */
 const argv = Object.fromEntries(
   process.argv.slice(2).map((a) => {
-    const [k, v] = a.replace(/^--/, "").split("=");
-    return [k, v === undefined ? true : v];
+    const body = a.replace(/^--/, "");
+    const eq = body.indexOf("=");
+    return eq === -1 ? [body, true] : [body.slice(0, eq), body.slice(eq + 1)];
   }),
 );
 
@@ -141,7 +144,8 @@ async function main() {
     const record = (name, pass, detail) => results.checks.push({ name, pass, ...detail });
 
     const loadHarness = async (n) => {
-      await send("Page.navigate", { url: `${BASE}?n=${n}` });
+      const url = `${BASE}${BASE.includes("?") ? "&" : "?"}n=${n}`;
+      await send("Page.navigate", { url });
       await waitFor(() => evalInPage("!!(window.__harness && window.__harness.ready)"), {
         label: "harness ready",
       });
@@ -209,6 +213,76 @@ async function main() {
       opened.rendered > 0 && opened.rendered < opened.expected,
       { renderedOnOpen: opened.rendered, expectedOnOpen: opened.expected },
     );
+
+    /* ── D) the hidden native date input must not hijack taps aimed at the panel ──
+       `DateTapRow` lays an opacity-0 `<input type="date">` over its whole row, and that row
+       always sits somewhere behind the picker panel. If the input outranks the panel in paint
+       order, a tap meant for the list opens the OS date picker instead (filmed repro 2026-10:
+       typing "max" in To Account → tapping a result → native calendar popped over the list,
+       flickering, account never selected). */
+    const dateBand = await evalInPage(`(() => {
+      const input = document.querySelector('.m-tx-date-input');
+      const panel = document.querySelector('.m-tx-account-picker');
+      if (!input || !panel) return { missing: true, hasInput: !!input, hasPanel: !!panel };
+      const r = input.getBoundingClientRect();
+      const p = panel.getBoundingClientRect();
+      const x = Math.round(r.left + r.width / 2);
+      const y = Math.round(r.top + r.height / 2);
+      const hit = document.elementFromPoint(x, y);
+      return {
+        x,
+        y,
+        bandHeight: Math.round(r.height),
+        bandInsidePanel: r.top >= p.top - 1 && r.bottom <= p.bottom + 1,
+        panelZ: getComputedStyle(panel).zIndex,
+        dateInputDisabled: input.disabled,
+        topmostAtBand: hit ? String(hit.className || hit.tagName) : null,
+        topmostIsDateInput: hit === input,
+        topmostInsidePanel: !!(hit && hit.closest && hit.closest('.m-tx-account-picker')),
+      };
+    })()`);
+
+    if (!dateBand.missing) {
+      for (const type of ["mousePressed", "mouseReleased"]) {
+        await send("Input.dispatchMouseEvent", {
+          type,
+          x: dateBand.x,
+          y: dateBand.y,
+          button: "left",
+          clickCount: 1,
+        });
+      }
+      await sleep(300);
+    }
+    const afterDateTap = dateBand.missing
+      ? { dateInputFocused: null, pickerOpen: true, activeElement: null }
+      : await evalInPage(`(() => {
+          const input = document.querySelector('.m-tx-date-input');
+          return {
+            dateInputFocused: document.activeElement === input,
+            pickerOpen: !!document.querySelector('.m-tx-account-picker'),
+            activeElement: document.activeElement
+              ? String(document.activeElement.className || document.activeElement.tagName)
+              : null,
+          };
+        })()`);
+    record(
+      "date: a tap over the panel must not reach the row's hidden native date input",
+      !dateBand.missing &&
+        dateBand.bandInsidePanel &&
+        dateBand.topmostInsidePanel &&
+        !dateBand.topmostIsDateInput &&
+        !afterDateTap.dateInputFocused,
+      { ...dateBand, ...afterDateTap },
+    );
+
+    /* The probe tap may have selected a row (which closes the panel) — put the picker back
+       with the search field focused before the IME phase. */
+    if (!afterDateTap.pickerOpen) await openPicker();
+    await evalInPage(
+      "(() => { const i = document.querySelector('.m-tx-account-picker-search input'); if (i) i.focus(); return true; })()",
+    );
+    await sleep(200);
 
     /* ── A) IME composition (Chinese / word-mode keyboard path) ── */
     const compose = async (text) => {
@@ -324,6 +398,7 @@ async function main() {
       totalAtN,
       totalFloor,
       frameGapAtN: Math.round(scenario.metrics.maxFrameGap),
+      dateBandTopmost: dateBand.topmostAtBand,
     };
     console.log(JSON.stringify(results, null, 2));
     const failed = results.checks.filter((c) => !c.pass);

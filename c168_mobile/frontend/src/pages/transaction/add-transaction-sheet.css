@@ -400,11 +400,16 @@
   color: var(--m-color-label);
 }
 
-/* Search panel: covers the sheet body (positioned against .m-add-tx-panel). */
+/* Search panel: covers the sheet body (positioned against .m-add-tx-panel).
+   z-index MUST stay above `.m-tx-date-input` (10): that hidden `<input type="date">` spans its
+   whole row, and the row always sits somewhere behind this panel — with a lower z-index the tap
+   meant for the list lands on the date field and opens the OS date picker. (Reported 2026-10,
+   filmed repro: typing "max" in To Account, tapping a result → native calendar popped over it,
+   flickering, account never selected.) */
 .m-tx-account-picker {
   position: absolute;
   inset: 0;
-  z-index: 2;
+  z-index: 20;
   display: flex;
   min-height: 0;
   flex-direction: column;

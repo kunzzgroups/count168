@@ -100,6 +100,7 @@ function AccountPicker({
   notLoadedText,
   onRetry,
   closeLabel,
+  onOpenChange,
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -168,11 +169,24 @@ function AccountPicker({
     [query],
   );
 
+  /**
+   * The sheet needs to know while a panel is up: its `DateTapRow` overlays a native
+   * `<input type="date">` on the whole row, so that input is disabled for as long as the
+   * panel covers the sheet (belt-and-braces on top of the panel's z-index).
+   */
+  const setPanelOpen = useCallback(
+    (next) => {
+      setOpen(next);
+      onOpenChange?.(next);
+    },
+    [onOpenChange],
+  );
+
   const close = useCallback(() => {
-    setOpen(false);
+    setPanelOpen(false);
     setQuery("");
     setWindowSize(OPTION_WINDOW_STEP);
-  }, []);
+  }, [setPanelOpen]);
 
   useEffect(() => {
     if (open) searchRef.current?.focus();
@@ -209,7 +223,7 @@ function AccountPicker({
         aria-label={label || placeholder}
         onClick={() => {
           if (disabled) return;
-          setOpen(true);
+          setPanelOpen(true);
         }}
       >
         <span className="m-tx-account-trigger-text">
@@ -333,6 +347,8 @@ export default function AddTransactionSheet({
   const [txRemark, setTxRemark] = useState("");
   const [txConfirm, setTxConfirm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  /** True while an account panel is up — switches off the row's hidden native date inputs. */
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const [rateToAccount, setRateToAccount] = useState(null);
   const [rateFromAccount, setRateFromAccount] = useState(null);
@@ -368,6 +384,7 @@ export default function AddTransactionSheet({
     notLoadedText: m.accountsNotLoaded,
     onRetry: onReloadAccounts,
     closeLabel: m.close,
+    onOpenChange: setPickerOpen,
   };
   /** Owner preference: MYR leads whenever the company offers it (same rule as Add Account). */
   const myrAvailable = currencyOptions.includes("MYR");
@@ -401,6 +418,12 @@ export default function AddTransactionSheet({
     setRateTransferToAccount(null);
     setRateTransferFromAccount(null);
   }, []);
+
+  useEffect(() => {
+    /* The sheet unmounts its body while closed, so a panel left open would never report
+       `false` — reset it here or the date row would stay disabled. */
+    if (!open) setPickerOpen(false);
+  }, [open]);
 
   useEffect(() => {
     if (!open) resetForm();
@@ -730,7 +753,7 @@ export default function AddTransactionSheet({
           <DateTapRow
             label={isRate ? m.date || m.rateTransactionDate : m.transactionDate}
             value={txDateYmd}
-            disabled={mutationsBlocked}
+            disabled={mutationsBlocked || pickerOpen}
             onChange={setTxDateYmd}
             badge={todayDmy === txDate ? m.today : null}
           />

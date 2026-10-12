@@ -14,6 +14,67 @@ import "../src/index.css";
 const params = new URLSearchParams(location.search);
 const N = Math.max(1, Number(params.get("n") || 2000));
 
+/*
+ * `?legacyZ=1` restores the pre-fix behaviour so the reported bug can be reproduced by hand:
+ * the picker panel drops back under the row's hidden `<input type="date">` (z-index) and the
+ * date inputs are re-enabled while the panel is open (the sheet's belt-and-braces guard).
+ * Tap anywhere in the date row's band — the line just under the sheet header — while the panel
+ * is up: legacy opens the OS date picker, fixed reaches the list.
+ */
+const legacyZ = params.get("legacyZ") === "1";
+if (legacyZ) {
+  const style = document.createElement("style");
+  /*
+   * Two things have to go back to the pre-fix state together:
+   *  - the panel's z-index (it used to sit under the row's hidden date input),
+   *  - the `--disabled` row class, whose `opacity: .5` creates a stacking context of its own
+   *    and would hide the date input behind the panel all by itself.
+   */
+  style.textContent =
+    ".m-tx-account-picker { z-index: 2 !important; }\n" +
+    ".m-tx-date-row--disabled { opacity: 1 !important; }";
+  document.head.appendChild(style);
+
+  const reEnableDateInputs = () => {
+    document
+      .querySelectorAll('.m-tx-date-input[disabled]')
+      .forEach((el) => {
+        el.disabled = false;
+      });
+  };
+  const legacyObserver = new MutationObserver(reEnableDateInputs);
+  legacyObserver.observe(document.getElementById("root"), {
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["disabled"],
+  });
+}
+
+/* `?mark=1` outlines the date row's hit band above everything else, so the manual test knows
+   where the hidden native date input sits while the picker panel covers the sheet. */
+if (params.get("mark") === "1") {
+  const box = document.createElement("div");
+  box.style.cssText =
+    "position:fixed;pointer-events:none;z-index:9999;border:2px dashed #ef4444;" +
+    "border-radius:12px;background:rgba(239,68,68,.08)";
+  document.body.appendChild(box);
+  const place = () => {
+    const row = document.querySelector(".m-tx-date-row");
+    if (!row) return;
+    const r = row.getBoundingClientRect();
+    box.style.left = `${r.left}px`;
+    box.style.top = `${r.top}px`;
+    box.style.width = `${r.width}px`;
+    box.style.height = `${r.height}px`;
+  };
+  place();
+  setInterval(place, 250);
+  new MutationObserver(place).observe(document.getElementById("root"), {
+    subtree: true,
+    childList: true,
+  });
+}
+
 const NAME_POOL = [
   "CASH",
   "BANK",
@@ -145,6 +206,7 @@ function summarize() {
 }
 
 window.__harness = {
+  legacyZ,
   get ready() {
     return !!document.querySelector(".m-tx-account-trigger");
   },
