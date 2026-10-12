@@ -9,6 +9,13 @@
  *
  * 关键约束：disabled/unlocked 之外的任何状态都**不能渲染任何业务页面**，
  * 否则会先打出 API 请求（路由本身没有守卫，见 App.jsx）。
+ *
+ * ── 两条路径 ────────────────────────────────────────────────
+ *
+ *   安卓 APK（isNative）：生物识别凭据（Keystore 里的 device_token）或 PIN → 锁屏
+ *   iOS / 网页（!isNative）：**只有设过 PIN 才锁**。
+ *     那里 loadToken() 恒为 null（见 lib/biometricStore.js），所以不会有生物识别
+ *     自动弹窗；passkey 那条路仍然由 LoginPage 自己管，这里不碰。
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -57,8 +64,7 @@ const PERMANENT_FAILURE_CODES = new Set([
  *
  * 注意别把 biometryLockout 放进来 —— 那是“失败次数过多临时锁定”，
  * 等一会就能再用，清掉凭据对用户是损失。
- */
-const BIOMETRIC_UNUSABLE_CODES = new Set([
+ */const BIOMETRIC_UNUSABLE_CODES = new Set([
   "biometryNotEnrolled",
   "biometryNotAvailable",
   "passcodeNotSet",
@@ -84,7 +90,13 @@ export function methodUnavailable(code) {
 
 export function useBiometricUnlock() {
   const navigate = useNavigate();
-  const [state, setState] = useState(() => (isNative() ? GATE_CHECKING : GATE_DISABLED));
+  const [state, setState] = useState(() =>
+    // ⚠️ 网页端（iOS 的 Safari / 加到主屏幕）也要进来 —— 只要本机设过 PIN。
+    // 以前这里只有 isNative()，于是「没指纹/人脸」的 iOS 用户设了 PIN 也**永远不锁**，
+    // 那条设置项就是个装饰（用户报的就是这个）。
+    // 没设 PIN 的网页用户走的还是老路：直接 DISABLED（passkey 由登录页管，行为不变）。
+    isNative() || pinEnabled() ? GATE_CHECKING : GATE_DISABLED,
+  );
   const [busy, setBusy] = useState(false);
   /**
    * 本机**有没有生物识别凭据**（Keystore 里的 device_token）。

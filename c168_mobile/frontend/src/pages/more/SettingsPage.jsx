@@ -127,11 +127,16 @@ export default function SettingsPage() {
   const [pinNotice, setPinNotice] = useState("");
   const pinOn = pinSetup.state.enabled;
   /**
-   * PIN **只在原生壳里**有意义：网页端根本不走启动门禁（那边是 passkey / 保持登录），
-   * 在这一侧让用户设一个永远用不上的 PIN，比不给这个开关更糟。
-   * 所以这里跟锁屏的判据保持一致：isNative()。
+   * PIN 在所有平台上都有意义：
+   *   · 安卓原生壳 —— 没指纹/人脸的用户的锁屏
+   *   · iOS（Safari / 加到主屏幕）—— **同一批用户唯一的快捷入口**
+   *     （那里 passkey 在独立 App 里用不了，见 lib/webauthn.js）
+   *
+   * ⚠️ 曾经写成 `isNative() && isPinSupported()`：那一版把 iOS 直接排掉了，
+   * 用户实机反馈“iOS 设置里还是旧的”——因为那一行根本没渲染。
+   * 判据只该看**这台设备能不能安全地存 PIN**（有 WebCrypto + 存储）。
    */
-  const pinSupported = useMemo(() => isNative() && isPinSupported(), []);
+  const pinSupported = useMemo(() => isPinSupported(), []);
 
   const setLang = useCallback((next) => {
     setLangState(writeLoginLang(next));

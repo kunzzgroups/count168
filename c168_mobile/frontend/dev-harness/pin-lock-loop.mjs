@@ -455,6 +455,56 @@ async function main() {
       fourState === 4 && fourUnlocked === true,
       `dots=${fourState} unlocked=${fourUnlocked}`,
     );
+
+    // ── 10. iOS / 网页：设过 PIN 就要锁，且能解开 ──────────────────
+    console.log("iOS / web path");
+    await goto(`${BASE}?web=1`);
+    await waitFor(async () => evalInPage("!!document.querySelector('[data-testid=\"bio-lock-pin-pad\"]')"), {
+      label: "web PIN pad",
+    }).catch(async () => {
+      const dump = await evalInPage("document.body.innerText.slice(0, 200)");
+      throw new Error(`web 端设了 PIN 却没锁；页面文本 = ${dump}`);
+    });
+    const webState = JSON.parse(
+      await evalInPage(`JSON.stringify({
+        pad: !!document.querySelector('[data-testid="bio-lock-pin-pad"]'),
+        retry: !!document.querySelector('[data-testid="bio-lock-retry"]'),
+        app: !!document.querySelector('#app-content')
+      })`),
+    );
+    await typePin(SEED_PIN);
+    const webUnlocked = await waitFor(
+      async () => evalInPage("!!document.querySelector('#app-content')"),
+      { label: "web unlock", timeout: 15000 },
+    ).catch(() => false);
+    record(
+      "10. iOS/网页：设过 PIN → 启动就锁（PIN 盘，无生物识别入口）且能解开",
+      webState.pad === true && webState.retry === false && webState.app === false && webUnlocked === true,
+      `${JSON.stringify(webState)} unlocked=${webUnlocked}`,
+    );
+
+    // ── 11. iOS / 网页：**没**设 PIN 的用户行为必须一点没变（不锁） ──
+    await goto(`${BASE}?web=1&nopin=1`);
+    const noPinState = await waitFor(
+      async () =>
+        evalInPage(`(() => {
+          const app = !!document.querySelector('#app-content');
+          const pad = !!document.querySelector('[data-testid="bio-lock-pin-pad"]');
+          const lock = !!document.querySelector('.bio-lock');
+          if (app || pad || lock) return JSON.stringify({ app, pad, lock });
+          // 还没渲染完就先返回 false（不把“空白”当成“没锁”）
+          return document.querySelector('.bio-lock, #app-content, #harness-loading')
+            ? JSON.stringify({ app, pad, lock })
+            : false;
+        })()`),
+      { label: "web without PIN", timeout: 15000 },
+    );
+    const parsedNoPin = JSON.parse(noPinState);
+    record(
+      "11. iOS/网页：没设 PIN → 不锁，行为与改动前一致（passkey 那条路不受影响）",
+      parsedNoPin.app === true && parsedNoPin.pad === false && parsedNoPin.lock === false,
+      noPinState,
+    );
   } catch (error) {
     console.error(`\nharness error: ${error?.message || error}`);
     process.exitCode = 2;

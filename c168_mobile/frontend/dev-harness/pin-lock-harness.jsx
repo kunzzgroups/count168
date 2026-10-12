@@ -19,6 +19,8 @@
  *   /dev-harness/pin-lock.html?bio=1        → both available (biometric card, PIN as the fallback)
  *   ?setup=1                                → only the "set up PIN" modal
  *   ?pin=4821&len=4                         → enrol a 4-digit PIN instead of the default 6
+ *   ?web=1                                  → iOS / plain web (no native bridge)
+ *   ?web=1&nopin=1                          → web with no PIN at all: must NOT lock
  */
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -37,6 +39,15 @@ const params = new URLSearchParams(location.search);
 const PIN = params.get("pin") || "482917";
 const LEN = Number(params.get("len") || PIN.length);
 const WITH_BIOMETRIC = params.get("bio") === "1";
+/**
+ * 模拟 iOS / 普通网页：**不**注入原生桥。
+ *
+ * 这一侧以前完全不进门禁（loadToken 恒为 null），所以“设了 PIN 也永远不锁”
+ * 这个回归只能在这里测到。
+ */
+const WEB = params.get("web") === "1";
+/** 不设 PIN（验证“没设 PIN 的网页用户行为一点没变”） */
+const NO_PIN = params.get("nopin") === "1";
 /** 只挂「设置 PIN」的弹窗（见下面 SetupHarness 的说明） */
 const SETUP_ONLY = params.get("setup") === "1";
 
@@ -44,7 +55,7 @@ const SETUP_ONLY = params.get("setup") === "1";
 const DEVICE_TOKEN = "b".repeat(64);
 
 /** 真实环境的判据：只有原生桥在，`isNative()` 才是 true */
-window.androidBridge = window.androidBridge || {};
+if (!WEB) window.androidBridge = window.androidBridge || {};
 
 /** 插件 web 实现的前缀（见 node_modules/@aparajita/capacitor-secure-storage/dist/esm/base.js） */
 const SECURE_PREFIX = "capacitor-storage_";
@@ -148,7 +159,7 @@ function Harness() {
         }
       }
       await clearPin();
-      await createPin({ pin: PIN, len: LEN, token: DEVICE_TOKEN });
+      if (!NO_PIN) await createPin({ pin: PIN, len: LEN, token: DEVICE_TOKEN });
       setReady(true);
     })();
   }, []);
