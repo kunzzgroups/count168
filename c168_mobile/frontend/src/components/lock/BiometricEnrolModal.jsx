@@ -185,7 +185,7 @@ export function useBiometricEnrol(onDone) {
  * 画指纹图标等于替用户预设了方式（锁屏那边也因为同一原因改成中性图标）。
  *
  * @param {object} props
- * @param {"biometric"|"pin"} [props.mode] 不传时用本轮 offer 记下的方式（见 lastOfferMode）
+ * @param {"biometric"|"pin"} [props.mode] 不传时用本轮 offer 记下的方式（见 pendingOffer）
  */
 export function BiometricEnrolModal({ open, busy, error, mode, onEnable, onEnablePin, onSkip }) {
   const i18n = LOGIN_I18N[readLoginLang()] || LOGIN_I18N.en;

@@ -24,6 +24,7 @@ disappears again"* bug is reproduced on the **real page** there — run the app 
 npm run dev -- --port 5174 --strictPort
 node dev-harness/login-loop.mjs                      # 5 checks, all 5 fail on the pre-fix code
 node dev-harness/search-sweep.mjs                    # wiring check for the other search boxes
+node dev-harness/pin-lock-loop.mjs                   # 14 checks: lock screen + PIN pad + PIN setup
 ```
 
 `search-sweep.mjs` walks `/account`, `/maintenance/payment`, `/report/*`, `/more/auto-renew`,
@@ -31,7 +32,12 @@ node dev-harness/search-sweep.mjs                    # wiring check for the othe
 the sweep reports them as `skipped` (never as a pass). Run it with the dev stack up
 (`docs/local-mobile-dev-runbook.md`) to get real readings.
 
-Manual testing in a browser (no backend needed — the account list is mocked):
+`pin-lock-loop.mjs` drives `pin-lock.html` because the startup lock screen only renders inside the
+Android shell (`isNative()`). The harness fakes exactly two things — the native bridge and
+`device_login_api.php`; the PIN crypto, localStorage, gate and keypad are the real code.
+`--shots=1` also writes the screenshots next to it. Design notes: `docs/mobile-pin-unlock.md`.
+
+Manual testing in a browser (no backend needed — the list/token are mocked):
 
 | URL | What it shows |
 |---|---|
@@ -39,6 +45,9 @@ Manual testing in a browser (no backend needed — the account list is mocked):
 | `…/dev-harness/account-picker.html?legacyZ=1` | pre-fix stacking order (the reported bug) |
 | `…/dev-harness/account-picker.html?mark=1` | red dashed box over the date row's hidden hit band |
 | `…/dev-harness/account-picker.html?n=20000` | account count (default 2000) |
+| `…/dev-harness/pin-lock.html` | the PIN-only lock screen (no biometric credential on the device) |
+| `…/dev-harness/pin-lock.html?bio=1` | a device that also has a fingerprint: biometric card with both fallbacks |
+| `…/dev-harness/pin-lock.html?setup=1` | the "set up PIN" modal on its own |
 
 Recipe: open the To Account field, type a few digits (the mock codes run `1001…`), keep the panel
 up, then click inside the date row's band (add `&mark=1` to see it). `legacyZ=1` → the OS date
