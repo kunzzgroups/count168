@@ -274,12 +274,15 @@ export default function SecondaryPasswordPage({ variant }) {
           </div>
         </div>
 
+        {/* 两种引导（生物识别 / PIN）由 `mode` 决定，见 components/lock/BiometricEnrolModal.jsx */}
         <BiometricEnrolModal
           open={enrol.open}
           busy={enrol.busy}
           error={enrol.error}
+          mode={enrol.mode}
           onSkip={enrol.skip}
           onEnable={() => void enrol.enable()}
+          onEnablePin={(pin, len) => void enrol.enablePin(pin, len)}
         />
       </div>
     </div>

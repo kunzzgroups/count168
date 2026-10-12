@@ -901,3 +901,20 @@ body.bg .sc-login-input::placeholder {
   opacity: 0.6;
   cursor: default;
 }
+
+/*
+ * Build marker (bottom of the login column): `build <git sha> · MM-DD HH:mm`.
+ * It exists so a bug report can be tied to the bundle the user is actually running — the phone app
+ * is a remote SPA, so it keeps its old bundle until the page reloads, and "still broken" is often
+ * "still the old bundle". Keep it tiny and unobtrusive.
+ */
+.sc-login-build {
+  margin: 10px 0 0;
+  text-align: center;
+  font-size: 9px;
+  line-height: 1.4;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.42);
+  user-select: text;
+  -webkit-user-select: text;
+}

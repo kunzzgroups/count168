@@ -45,6 +45,8 @@ export default function KeyboardOwnedInput({
   const [text, setText] = useState(initialValue);
   const onValueChangeRef = useRef(onValueChange);
   onValueChangeRef.current = onValueChange;
+  /** Only maintained when a ✕ is rendered — login/password fields do not need it. */
+  const needsText = Boolean(clearLabel);
   /** The last text we published or adopted — compared against, never written back blindly. */
   const lastTextRef = useRef(initialValue);
 
@@ -62,7 +64,7 @@ export default function KeyboardOwnedInput({
     const publish = () => {
       if (el.value === lastTextRef.current) return;
       lastTextRef.current = el.value;
-      setText(el.value);
+      if (needsText) setText(el.value);
       onValueChangeRef.current?.(el.value);
     };
 
@@ -72,7 +74,7 @@ export default function KeyboardOwnedInput({
       el.removeEventListener("input", publish);
       el.removeEventListener("compositionend", publish);
     };
-  }, []);
+  }, [needsText]);
 
   useEffect(() => {
     const el = inputRef.current;
@@ -84,14 +86,14 @@ export default function KeyboardOwnedInput({
     }
     el.value = value;
     lastTextRef.current = value;
-    setText(value);
-  }, [value]);
+    if (needsText) setText(value);
+  }, [value, needsText]);
 
   const clear = () => {
     const el = inputRef.current;
     if (el) el.value = "";
     lastTextRef.current = "";
-    setText("");
+    if (needsText) setText("");
     onValueChangeRef.current?.("");
     onClear?.();
   };

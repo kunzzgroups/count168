@@ -114,6 +114,34 @@
   text-align: right;
 }
 
+/* 设置行右侧的“一组”控件（例如 PIN 那一行的「修改」+ 开关）。
+   为何要包一层：.m-more-settings-row 是 space-between，直接把两个控件
+   作为兄弟节点丢进去会被摊到行的两端（「修改」飘到中间）。 */
+.m-more-settings-inline {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  flex-shrink: 0;
+}
+
+/* 行内文字按钮（修改 PIN）。
+   刻意不用 .m-more-logout —— 它是 width:100% 的整行按钮，
+   放在行内会把整行压成一条蓝条（这行上方的注释记过同一个坑）。 */
+.m-more-settings-inline-btn {
+  border: 0;
+  padding: 0.2rem 0.1rem;
+  background: transparent;
+  color: var(--m-color-primary, #0d60ff);
+  font-family: inherit;
+  font-size: var(--m-text-small);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.m-more-settings-inline-btn:hover {
+  text-decoration: underline;
+}
+
 /* 设置行下方的说明文字 */
 .m-more-settings-hint {
   margin: 0;

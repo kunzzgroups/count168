@@ -1,15 +1,9 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { readLoginLang } from "../../lib/loginLang.js";
-import {
-  CAP,
-  METHOD,
-  canOfferMethodSwitch,
-  ensureSettings,
-  saveSettings,
-} from "../../lib/biometricSettings.js";
-import { loadToken } from "../../lib/biometricStore.js";
+import { CAP, METHOD, canOfferMethodSwitch, ensureSettings, saveSettings } from "../../lib/biometricSettings.js";
 import {
   FAIL_BIOMETRIC,
+  FAIL_PIN,
   GATE_CHECKING,
   GATE_DISABLED,
   GATE_LOCKED,
@@ -17,6 +11,8 @@ import {
   methodUnavailable,
   useBiometricUnlock,
 } from "../../hooks/useBiometricUnlock.js";
+import { pinFormat, pinText } from "../../translateFile/pinTranslate.js";
+import PinPad from "./PinPad.jsx";
 import "./biometric-lock.css";
 
 /**
@@ -40,8 +36,6 @@ const ATTEMPTS_BEFORE_PASSWORD_FIRST = 2;
 function lockIcon(method) {
   return method === METHOD.FINGERPRINT ? "fas fa-fingerprint" : "fas fa-shield-halved";
 }
-
-/** 未识别时的文案：**不提具体方式**（同上，我们无法保证弹的是哪一种） */
 
 const TEXT = {
   zh: {
@@ -114,78 +108,130 @@ const TEXT = {
  * 必须包住**整个** App 内容（含 Routes、实时桥、底部导航）：
  * 路由本身没有守卫，任何子组件一挂载就会打 API 请求。
  * 只有 unlocked / disabled 才渲染 children。
+ *
+ * ── 两条解锁路径（同一张设备令牌，两个入口）──────────────────────────
+ *
+ *   生物识别：系统弹窗 → Keystore 里的明文令牌 → 换会话
+ *   PIN     ：本机 4/6 位码解开密文 → 令牌 → 换会话
+ *
+ * 「锁不锁」= 有生物识别凭据 **或** 设过 PIN（见 hooks/useBiometricUnlock.js）。
+ * 因此**没有指纹/人脸的设备也会被锁上** —— 那正是这次改动要服务的人。
  */
 export default function BiometricLockGate({ children }) {
-  const { state, busy, failure, attempts, capabilityState, unlock, usePasswordInstead } =
-    useBiometricUnlock();
+  const {
+    state,
+    busy,
+    failure,
+    attempts,
+    capabilityState,
+    bioCredential,
+    pin,
+    pinTries,
+    unlock,
+    unlockWithPin,
+    usePasswordInstead,
+  } = useBiometricUnlock();
   const [lang, setLang] = useState(() => readLoginLang());
   /**
    * 用户选的解锁方式。**只用来决定图标**，不用来决定流程 ——
    * 流程由 resolveBiometric() 单一决策（见 lib/biometricSettings.js）。
    */
   const [method, setMethod] = useState(() => METHOD.NONE);
+  /**
+   * 用户是否**主动**切到 PIN 界面。
+   *   null  = 没表态 → 按设备实情自动决定（只有 PIN / 生物识别已不可用 → 直接给 PIN）
+   *   true  = 明确要看 PIN
+   *   false = 明确要回生物识别
+   *
+   * 用三态而不是布尔：自动判断只在用户没表态时生效，
+   * 否则用户点回「用指纹」后会被自动逻辑立刻弹回 PIN —— 实机上的死循环就是这么来的。
+   */
+  const [pinChoice, setPinChoice] = useState(null);
 
-  // ⚠️⚠️ 下面这三个 hook 必须在下面那个 `if (...) return children` **之前**。
-  //
+  // ⚠️⚠️ 所有 hook 必须在下面那个 `if (...) return children` **之前**。
   // 本组件在已解锁 / 已关闭时会提前 return children，而 React 要求
   // **所有 hook 在每一次渲染中都按同一顺序被调用**。一旦 hook 落在提前 return
   // 之后，解锁那一瞬间 hook 数量就会变 → React 抛错 → **整个 App 白屏**。
-  // 实机白屏就是这么来的（之前那个位置下面一个 hook 也没有，所以是新增代码触发的）。
-
-  const t = TEXT[lang] || TEXT.en;
-
   if (state === GATE_UNLOCKED || state === GATE_DISABLED) {
     return children;
   }
 
+  const t = TEXT[lang] || TEXT.en;
+  const tp = pinText(lang);
   const isChecking = state === GATE_CHECKING;
+
+  /**
+   * PIN 相关的失败文案。**只有这几条**能被 PIN 界面的错误行显示 ——
+   * 服务端的暂时性失败（维护中 / 连不上）也在其中，因为那时 PIN 是对的。
+   */
+  const pinFailureText = (() => {
+    if (!failure) return "";
+    if (failure.kind === FAIL_PIN) {
+      switch (failure.code) {
+        case "WRONG_PIN":
+          return pinTries <= 1 ? tp.pinWrongLast : pinFormat(tp.pinWrong, { left: pinTries });
+        case "LOCKED_OUT":
+          return tp.pinLockedOut;
+        case "NO_PIN":
+          return tp.pinNoPin;
+        case "CORRUPT":
+          return tp.pinCorrupt;
+        case "NO_CRYPTO":
+          return tp.setupNoCrypto;
+        case "BAD_FORMAT":
+          return tp.setupBadFormat;
+        default:
+          return tp.pinWrong;
+      }
+    }
+    if (failure.kind === FAIL_BIOMETRIC) return "";
+    return t.byCode[failure.code] || failure.message || t.tryLater;
+  })();
 
   let hint = t.lockedHint;
   if (busy) {
     hint = t.verifying;
   } else if (failure) {
     hint =
-      failure.message ||
-      (t.byCode && t.byCode[failure.code]) ||
-      (attempts >= ATTEMPTS_BEFORE_PASSWORD_FIRST
-        ? t.tooMany
-        : failure.kind === FAIL_BIOMETRIC
-          ? t.bioFailed
-          : t.tryLater);
+      failure.kind === FAIL_PIN
+        ? pinFailureText
+        : failure.message ||
+          (t.byCode && t.byCode[failure.code]) ||
+          (attempts >= ATTEMPTS_BEFORE_PASSWORD_FIRST
+            ? t.tooMany
+            : failure.kind === FAIL_BIOMETRIC
+              ? t.bioFailed
+              : t.tryLater);
   }
 
   // 连续失败后把密码登录提到主位
   const passwordFirst = attempts >= ATTEMPTS_BEFORE_PASSWORD_FIRST;
 
-  const retryButton = (primary) => (
-    <button
-      type="button"
-      className={`bio-lock__btn ${primary ? "bio-lock__btn--primary" : "bio-lock__btn--ghost"} tap-scale`}
-      onClick={() => void unlock()}
-      disabled={busy}
-    >
-      <i className={lockIcon(method)} aria-hidden="true" />
-      <span>{busy ? t.verifying : t.retry}</span>
-    </button>
-  );
-
   // 自动校正已经移到**弹窗之前**（见 hooks/useBiometricUnlock.js 的
-  // preflightThenUnlock）：在那里判断一次，就能保证**第一次弹的就是正确的方式**，
-  // 用户不会先看到一次注定失败的认证。
-  //
-  // 这里只保留**手动回退** —— 当自动换不了（探测没给出明确答案）时，
-  // 用户仍然有路可走，但要不要换由他决定。
+  // preflightThenUnlock）：在那里判断一次，就能保证**第一次弹的就是正确的方式**。
+  // 这里只保留**手动回退**。
   const otherMethod = method === METHOD.FINGERPRINT ? METHOD.FACE : METHOD.FINGERPRINT;
-  const needsSwitch = Boolean(failure) && methodUnavailable(failure.code);
+  const needsSwitch = Boolean(failure) && failure.kind === FAIL_BIOMETRIC && methodUnavailable(failure.code);
   const offerSwitch = needsSwitch && canOfferMethodSwitch(capabilityState);
   /**
    * 两种方式都没有 → **不给任何切换按钮**，只说一件事 + 一个出口。
-   *
-   * 为何：实机截图拍到了死循环 —— “指纹已不可用” → [改用人脸] →
-   * “人脸已不可用” → [改用指纹] → …，用户永远出不去。
-   * 而真正该说的是“这台手机还没录入任何生物识别”。
+   * 实机截图拍到过死循环：“指纹已不可用” → [改用人脸] → “人脸已不可用” → [改用指纹] → …
    */
   const nothingEnrolled = needsSwitch && capabilityState === CAP.NOT_ENROLLED;
+
+  /**
+   * 是不是该显示 PIN 界面。
+   *
+   *   用户明确点过 PIN                → 显示（只要 PIN 还在）
+   *   用户明确点过「用指纹/人脸」      → 不显示
+   *   用户没表态：只有 PIN（没有生物识别凭据）→ 显示
+   *              ：生物识别刚被证明不可用（没录入 / 被删掉）→ 显示
+   */
+  const autoPin = pin.enabled && !bioCredential;
+  const bioUnusableNow =
+    Boolean(failure) && failure.kind === FAIL_BIOMETRIC && (methodUnavailable(failure.code) || capabilityState === CAP.NOT_ENROLLED);
+  const showPin =
+    pin.enabled && (pinChoice === null ? autoPin || bioUnusableNow : pinChoice === true);
 
   const switchMethod = (target) => {
     saveSettings({ enabled: true, method: target });
@@ -205,56 +251,148 @@ export default function BiometricLockGate({ children }) {
     </button>
   );
 
-  const passwordButton = (primary) => (
+  const retryButton = (primary) => (
+    <button
+      type="button"
+      className={`bio-lock__btn ${primary ? "bio-lock__btn--primary" : "bio-lock__btn--ghost"} tap-scale`}
+      onClick={() => void unlock()}
+      disabled={busy}
+      data-testid="bio-lock-retry"
+    >
+      <i className={lockIcon(method)} aria-hidden="true" />
+      <span>{busy ? t.verifying : t.retry}</span>
+    </button>
+  );
+
+  /** 「用 PIN 解锁」—— 切到 PIN 键盘（**不做任何校验**，那是 PinPad 的事） */
+  const pinButton = (primary) => (
+    <button
+      type="button"
+      className={`bio-lock__btn ${primary ? "bio-lock__btn--primary" : "bio-lock__btn--ghost"} tap-scale`}
+      onClick={() => {
+        setPinChoice(true);
+      }}
+      disabled={busy}
+      data-testid="bio-lock-use-pin"
+    >
+      <i className="fas fa-key" aria-hidden="true" />
+      <span>{tp.usePin}</span>
+    </button>
+  );
+
+  /** PIN 界面的「用指纹 / 人脸解锁」—— 回到生物识别卡片 */
+  const backToBioButton = () => (
+    <button
+      type="button"
+      className="bio-lock__btn bio-lock__btn--ghost tap-scale"
+      onClick={() => {
+        setPinChoice(false);
+      }}
+      disabled={busy}
+      data-testid="bio-lock-use-biometric"
+    >
+      <i className={lockIcon(method)} aria-hidden="true" />
+      <span>{tp.useBiometric}</span>
+    </button>
+  );
+
+  /**
+   * 「返回登录」。**不清任何凭据**（见 useBiometricUnlock.usePasswordInstead 的说明）：
+   * 「这一次用密码」不等于「把解锁关掉」。
+   */
+  const loginButton = (primary, label) => (
     <button
       type="button"
       className={`bio-lock__btn ${primary ? "bio-lock__btn--primary" : "bio-lock__btn--ghost"} tap-scale`}
       onClick={() => void usePasswordInstead()}
       disabled={busy}
+      data-testid="bio-lock-back-to-login"
     >
-      <i className="fas fa-key" aria-hidden="true" />
-      <span>{t.usePassword}</span>
+      <i className="fas fa-arrow-left" aria-hidden="true" />
+      <span>{label}</span>
     </button>
   );
 
+  // 有 PIN 时：兜底按钮是「用 PIN 解锁」，而「返回登录」单独一个（用户明确要求两者都在）
+  const altButton = (primary) => (pin.enabled ? pinButton(primary) : loginButton(primary, t.usePassword));
+  const backToLogin = () => (pin.enabled ? loginButton(false, tp.backToLogin) : null);
+
+  const cardIcon = isChecking ? "fas fa-spinner fa-spin" : bioCredential ? lockIcon(method) : "fas fa-key";
+  const cardTitle = !bioCredential && pin.enabled ? tp.pinTitle : t.lockedTitle;
+  /** 没有生物识别凭据、但有 PIN：整张卡就是 PIN 卡，说明直接说 PIN */
+  const cardHint = !bioCredential && pin.enabled && !failure ? pinFormat(tp.pinHint, { len: pin.len }) : hint;
+
   return (
-    <div className="bio-lock" role="dialog" aria-modal="true" aria-label={t.lockedTitle}>      <div className="bio-lock__bg" aria-hidden="true" />
-      <div className="bio-lock__card">
+    <div className="bio-lock" role="dialog" aria-modal="true" aria-label={cardTitle}>
+      <div className="bio-lock__bg" aria-hidden="true" />
+      <div className={`bio-lock__card${showPin ? " bio-lock__card--pin" : ""}`}>
         <div className="bio-lock__icon" aria-hidden="true">
-          <i className={isChecking ? "fas fa-spinner fa-spin" : lockIcon(method)} />
+          <i className={cardIcon} />
         </div>
 
         {isChecking ? (
           <p className="bio-lock__hint">{t.checking}</p>
+        ) : showPin ? (
+          <>
+            <h1 className="bio-lock__title">{tp.pinTitle}</h1>
+            <p className="bio-lock__hint">{pinFormat(tp.pinHint, { len: pin.len })}</p>
+            <PinPad
+              len={pin.len}
+              busy={busy}
+              lang={lang}
+              error={busy ? "" : pinFailureText}
+              hint={busy ? tp.pinBusy : ""}
+              onSubmit={(entered) => unlockWithPin(entered)}
+              testId="bio-lock-pin"
+            />
+            {bioCredential ? backToBioButton() : null}
+            {loginButton(false, tp.backToLogin)}
+          </>
         ) : (
           <>
-            <h1 className="bio-lock__title">{t.lockedTitle}</h1>
-            <p className="bio-lock__hint">{hint}</p>
+            <h1 className="bio-lock__title">{cardTitle}</h1>
+            <p className="bio-lock__hint">{cardHint}</p>
             {offerSwitch ? (
               <p className="bio-lock__hint">
                 {method === METHOD.FINGERPRINT ? t.methodGoneFingerprint : t.methodGoneFace}
               </p>
             ) : null}
 
-            {/* 两种都没有：只说“去系统设置里添加”，并**只给密码一个出口** */}
+            {/* 两种都没有：只说“去系统设置里添加”，出口交给 PIN / 密码 */}
             {nothingEnrolled ? <p className="bio-lock__hint">{t.nothingEnrolled}</p> : null}
 
             {nothingEnrolled ? (
-              <>{passwordButton(true)}</>
+              <>
+                {altButton(true)}
+                {backToLogin()}
+              </>
             ) : offerSwitch ? (
               <>
                 {switchButton(true)}
-                {passwordButton(false)}
+                {altButton(false)}
+                {backToLogin()}
+              </>
+            ) : passwordFirst && pin.enabled ? (
+              <>
+                {pinButton(true)}
+                {retryButton(false)}
+                {backToLogin()}
               </>
             ) : passwordFirst ? (
               <>
-                {passwordButton(true)}
+                {loginButton(true, t.usePassword)}
                 {retryButton(false)}
+              </>
+            ) : !bioCredential ? (
+              <>
+                {altButton(true)}
+                {backToLogin()}
               </>
             ) : (
               <>
                 {retryButton(true)}
-                {passwordButton(false)}
+                {altButton(false)}
+                {backToLogin()}
               </>
             )}
           </>

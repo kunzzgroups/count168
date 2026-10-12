@@ -10,6 +10,7 @@
 
 import { authenticate, getDeviceId, loadToken, withTimeout } from "./biometricStore.js";
 import { loginWithDeviceToken } from "./deviceTokenApi.js";
+import { unlockWithPin } from "./pinStore.js";
 
 /**
  * @returns {Promise<{ok:boolean, stage:'biometric'|'credential'|'server', code?:string,
@@ -36,5 +37,34 @@ export async function nativeBiometricLogin() {
 
   // ③ 换会话
   const result = await loginWithDeviceToken({ token, deviceId: getDeviceId() });
+  return { ...result, stage: "server" };
+}
+
+/**
+ * 原生（APK）路径的 **PIN** 登录：PIN → 解开本地凭据 → 换成会话。
+ *
+ * 与上面的指纹路径是**同一条链路的两个入口**，只把第 ① 步换掉：
+ * 指纹是「系统弹窗证明是你」，PIN 是「只有你知道的码解开密文」。
+ * 第 ② ③ 步完全一致（同一张设备令牌、同一个换会话接口）——
+ * 这样服务端看到的仍然只是 device_login，不需要任何新端点、
+ * 也不需要为 PIN 另发一张令牌（设备名额不会多占一个）。
+ *
+ * ⚠️ 明文令牌只在这里的局部变量里出现，永远不回写 Keystore：
+ * 回写就等于「用过一次 PIN 之后，PIN 就不再是解锁的必需品」。
+ *
+ * @returns {Promise<{ok:boolean, stage:'pin'|'server', tokenOk?:boolean, code?:string,
+ *                    message?:string, redirect?:string, attempts?:number}>}
+ *   stage = 'pin'    → PIN 本身没通过（NO_PIN / WRONG_PIN / LOCKED_OUT / CORRUPT）
+ *   stage = 'server' → PIN 通过了，服务端拒绝（要按 code 再分永久 / 暂时）
+ */
+export async function nativePinLogin(pin) {
+  const deviceId = getDeviceId();
+
+  const opened = await unlockWithPin({ pin });
+  if (!opened.ok) {
+    return { ok: false, stage: "pin", code: opened.code, attempts: opened.attempts || 0 };
+  }
+
+  const result = await loginWithDeviceToken({ token: opened.token, deviceId });
   return { ...result, stage: "server" };
 }

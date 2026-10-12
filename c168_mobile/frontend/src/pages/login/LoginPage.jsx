@@ -18,6 +18,9 @@ import { onBrandLogoError } from "../../lib/brandAssets.js";
 // 切过去和静态图长得一样，肉眼看不到跳变。
 const LOGO_ANIMATION_MS = 2500;
 const LOGO_ANIM = "/images/count_logo_puzzle_animation.webp";
+
+/** Injected by vite.config.js (`define`) — see that function for why the login page shows it. */
+const BUILD_ID = typeof __BUILD_ID__ !== "undefined" ? __BUILD_ID__ : "dev";
 const LOGO_STATIC = "/images/count_logo.webp";
 
 function initialLogoSrc() {
@@ -569,6 +572,21 @@ export default function LoginPage() {
   };
 
   const maintenanceVisible = maintenanceList.length > 0;
+  /*
+   * Built once per maintenance list, not on every render: this used to re-parse the rich text of
+   * every item (twice, it is a marquee) on each keystroke the user typed.
+   */
+  const maintenanceItems = useMemo(
+    () =>
+      [...maintenanceList, ...maintenanceList].map((item, index) => (
+        <div className="sc-login-maintenance-item" key={`${item.id}-${index}`}>
+          <span className="sc-login-maintenance-dot" />
+          <span className="sc-login-maintenance-label">{item.prefix || i18n.maintenanceLabel}</span>
+          <span>{extractPlainTextFromRichText(item.content)}</span>
+        </div>
+      )),
+    [maintenanceList, i18n.maintenanceLabel],
+  );
 
   return (
     <>
@@ -585,13 +603,7 @@ export default function LoginPage() {
           {maintenanceVisible && (
             <div className="sc-login-maintenance-wrapper">
               <div className="sc-login-maintenance-track">
-                {[...maintenanceList, ...maintenanceList].map((item, index) => (
-                  <div className="sc-login-maintenance-item" key={`${item.id}-${index}`}>
-                    <span className="sc-login-maintenance-dot" />
-                    <span className="sc-login-maintenance-label">{item.prefix || i18n.maintenanceLabel}</span>
-                    <span>{extractPlainTextFromRichText(item.content)}</span>
-                  </div>
-                ))}
+                {maintenanceItems}
               </div>
             </div>
           )}
@@ -722,6 +734,9 @@ export default function LoginPage() {
               </form>
             </div>
           </div>
+          {/* 构建标记：报障时让用户念这一行，就能判断他跑的是哪份 bundle
+              （手机版是远程 SPA，不重载就一直是旧的；这样能直接排除“旧代码”这一层）。 */}
+          <p className="sc-login-build">build {BUILD_ID}</p>
         </div>
       </div>
 

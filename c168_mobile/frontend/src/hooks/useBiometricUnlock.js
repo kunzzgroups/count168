@@ -29,7 +29,13 @@ import {
   ensureSettings,
   saveSettings,
 } from "../lib/biometricSettings.js";
-import { nativeBiometricLogin } from "../lib/biometricLogin.js";
+import { nativeBiometricLogin, nativePinLogin } from "../lib/biometricLogin.js";
+import {
+  clearPin,
+  pinAttemptsLeft,
+  pinEnabled,
+  readPinSettings,
+} from "../lib/pinStore.js";
 
 export const GATE_CHECKING = "checking";
 export const GATE_LOCKED = "locked";
@@ -61,6 +67,8 @@ const BIOMETRIC_UNUSABLE_CODES = new Set([
 
 export const FAIL_BIOMETRIC = "biometric";
 export const FAIL_SERVER = "server";
+/** PIN 本身没通过（错码 / 没设过 / 错太多被清）。与生物识别失败分开：界面文案完全不同。 */
+export const FAIL_PIN = "pin";
 
 /**
  * 这个错误码说明**用户选的那种方式在这台设备上已经用不了了**
@@ -78,6 +86,19 @@ export function useBiometricUnlock() {
   const navigate = useNavigate();
   const [state, setState] = useState(() => (isNative() ? GATE_CHECKING : GATE_DISABLED));
   const [busy, setBusy] = useState(false);
+  /**
+   * 本机**有没有生物识别凭据**（Keystore 里的 device_token）。
+   *
+   * 为何必须单独记一位：PIN 用户（没指纹/人脸的那种）**没有**这张令牌，
+   * 但门禁同样要锁上。于是「锁不锁」不再等于「有没有令牌」，
+   * 而「要不要自动弹指纹」仍然是「有没有令牌」——两件事必须分开，
+   * 否则 PIN 用户启动时会先弹一次注定失败的生物识别。
+   */
+  const [bioCredential, setBioCredential] = useState(false);
+  /** PIN 设置（{enabled, len}）；失败后被清时要刷新 */
+  const [pin, setPin] = useState(() => readPinSettings());
+  /** 还能试几次（错到 0 就回密码登录） */
+  const [pinTries, setPinTries] = useState(() => pinAttemptsLeft());
   // { kind, code, message } —— message 优先展示（服务端可能给了具体原因，例如维护公告）
   const [failure, setFailure] = useState(null);
   const [attempts, setAttempts] = useState(0);
@@ -194,6 +215,67 @@ export function useBiometricUnlock() {
     navigate("/login", { replace: true });
   }, [goDisabled, navigate]);
 
+  /** 重新读 PIN 状态（设置页改过、或失败后被清掉时用） */
+  const refreshPin = useCallback(() => {
+    setPin(readPinSettings());
+    setPinTries(pinAttemptsLeft());
+  }, []);
+
+  /**
+   * 用 PIN 解锁。
+   *
+   * 与 unlock() 一样只做三件事：验证 → 换会话 → 决定留在锁屏还是放行。
+   * 区别在**失败的处理**：PIN 是「本地密码」，所以
+   *   · 错码 → 留在锁屏，把「还能试几次」告诉界面
+   *   · 错太多次 / 记录坏了 → PIN 已被清 → 刷新界面（界面会收回 PIN 入口）
+   *   · 令牌被吊销 / 过期 → 与生物识别同一条路：清凭据 + 清 PIN，回密码登录
+   *
+   * @returns {Promise<boolean>} true = 已解锁（调用方不要再做 UI 动作）
+   */
+  const unlockWithPin = useCallback(
+    async (entered) => {
+      setBusy(true);
+      setFailure(null);
+      try {
+        const result = await nativePinLogin(entered);
+
+        if (result.ok) {
+          refreshPin();
+          setState(GATE_UNLOCKED);
+          navigate(result.redirect, { replace: true });
+          return true;
+        }
+
+        if (result.stage === "pin") {
+          // PIN 记录在错太多次 / 坏掉时已经被清掉了 —— 界面据此收回入口
+          refreshPin();
+          setFailure({ kind: FAIL_PIN, code: result.code, message: "" });
+          return false;
+        }
+
+        // stage === "server"：PIN 对了，是服务端拒绝
+        if (PERMANENT_FAILURE_CODES.has(result.code)) {
+          // 凭据已废 → 连带把 PIN 记录清掉：它加密的正是这张废令牌，
+          // 留着只会让用户每次启动都输一遍 PIN 再被拒。
+          await clearPin();
+          refreshPin();
+          await goDisabled(true);
+          return false;
+        }
+
+        setFailure({
+          kind: FAIL_SERVER,
+          code: result.code || "UNKNOWN",
+          message: result.message || "",
+        });
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [goDisabled, navigate, refreshPin],
+  );
+
   useEffect(() => {
     if (state !== GATE_CHECKING) return undefined;
 
@@ -203,7 +285,11 @@ export function useBiometricUnlock() {
       // 那样门禁会永久停在“检查登录状态…”。超时当成“没凭据”处理。
       const token = await withTimeout(loadToken(), 4000);
       if (cancelled) return;
-      setState(typeof token === "string" && token ? GATE_LOCKED : GATE_DISABLED);
+      const hasCredential = typeof token === "string" && Boolean(token);
+      setBioCredential(hasCredential);
+      // 锁不锁：有生物识别凭据**或**设过 PIN，都要锁；两样都没有才直接进 App。
+      // ⚠️ 别写成只看凭据 —— 那样「只设了 PIN」的用户启动后**完全没有门禁**。
+      setState(hasCredential || pinEnabled() ? GATE_LOCKED : GATE_DISABLED);
     })();
 
     return () => {
@@ -226,11 +312,32 @@ export function useBiometricUnlock() {
   }, [state]);
 
   // 进入锁屏后自动弹一次；┖─ 弹之前先校正方式，确保**第一次就是正确的方式**。
+  //
+  // ⚠️ 没有生物识别凭据时**绝不自动弹**：那种用户是 PIN 用户，
+  // 弹一次生物识别只会失败（NO_CREDENTIAL），而那条分支会走 goDisabled(true)
+  // —— 等于把锁屏直接放行，门禁形同不存在。
   useEffect(() => {
     if (state !== GATE_LOCKED || attemptGuard.current) return;
+    if (!bioCredential) return;
     attemptGuard.current = true;
     void preflightThenUnlock();
-  }, [state, preflightThenUnlock]);
+  }, [state, bioCredential, preflightThenUnlock]);
 
-  return { state, busy, failure, attempts, capabilityState, unlock, usePasswordInstead };
+  return {
+    state,
+    busy,
+    failure,
+    attempts,
+    capabilityState,
+    /** 本机有没有生物识别凭据（决定要不要给「重试/指纹」这类入口） */
+    bioCredential,
+    /** { enabled, len } */
+    pin,
+    /** 还能试几次 PIN */
+    pinTries,
+    unlock,
+    unlockWithPin,
+    refreshPin,
+    usePasswordInstead,
+  };
 }

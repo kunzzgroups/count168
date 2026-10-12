@@ -27,6 +27,8 @@ const argv = Object.fromEntries(
 );
 
 const URL_UNDER_TEST = String(argv.url || "http://localhost:5174/login");
+const THROTTLE = Number(argv.throttle || 6);
+const FRAME_GAP_BUDGET_MS = Number(argv.budget || 120 + 30 * THROTTLE);
 const CHROME =
   process.env.CHROME_PATH ||
   path.join(process.env.LOCALAPPDATA || "", "ms-playwright/chromium-1228/chrome-win64/chrome.exe");
@@ -136,6 +138,24 @@ async function main() {
       deviceScaleFactor: 2,
       mobile: true,
     });
+    await send("Emulation.setCPUThrottlingRate", { rate: THROTTLE });
+    /* Frame + long-task instrumentation, installed before the app boots: "the delete key lags" is
+       a jank report, and a phone CPU is where it shows. */
+    await send("Page.addScriptToEvaluateOnNewDocument", {
+      source: `
+        window.__perf = { frames: [], longTasks: [], resetAt: 0 };
+        (function track(){
+          let last = performance.now();
+          const tick = (t) => { window.__perf.frames.push({ t, gap: t - last }); last = t; requestAnimationFrame(tick); };
+          requestAnimationFrame(tick);
+        })();
+        try {
+          new PerformanceObserver((list) => {
+            for (const e of list.getEntries()) window.__perf.longTasks.push({ t: e.startTime, duration: e.duration });
+          }).observe({ entryTypes: ['longtask'] });
+        } catch {}
+      `,
+    });
 
     const results = { url: URL_UNDER_TEST, checks: [] };
     const record = (name, pass, detail) => results.checks.push({ name, pass, ...detail });
@@ -235,6 +255,86 @@ async function main() {
     record("login: the hidden password field is type=password", typeAfter === "password", {
       typeWhenHidden: typeAfter,
     });
+
+    /* D0) the build marker: makes "which bundle is the user actually running" answerable. */
+    const buildMarker = await evalInPage(
+      "(() => { const el = document.querySelector('.sc-login-build'); return el ? el.textContent.trim() : null; })()",
+    );
+    record(
+      "login: the build marker is rendered (a bug report can name the bundle)",
+      Boolean(buildMarker && /^build \S/.test(buildMarker)),
+      { marker: buildMarker },
+    );
+
+    /* D) "the delete key lags" — type with the English keyboard, then hold/repeat Backspace. */
+    const readMetrics = () =>
+      evalInPage(`(() => {
+        const since = window.__perf?.resetAt || 0;
+        const frames = (window.__perf?.frames || []).filter((f) => f.t >= since);
+        const tasks = (window.__perf?.longTasks || []).filter((e) => e.t >= since);
+        return {
+          maxFrameGap: frames.length ? Math.max(...frames.map((f) => f.gap)) : 0,
+          longTaskCount: tasks.length,
+          totalLongTask: Math.round(tasks.reduce((s, e) => s + e.duration, 0)),
+          maxLongTask: tasks.length ? Math.round(Math.max(...tasks.map((e) => e.duration))) : 0,
+        };
+      })()`);
+
+    await evalInPage(`(() => {
+      const el = document.querySelector('#user-id');
+      el.focus();
+      el.value = '';
+      el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward' }));
+      return true;
+    })()`);
+    await sleep(300);
+    await evalInPage("window.__perf.resetAt = performance.now(); true");
+
+    /* type 12 characters one by one (an English keyboard) */
+    const TYPED = "alicebob1234";
+    const DELETES = 8;
+    for (const ch of TYPED) {
+      await send("Input.insertText", { text: ch });
+      await sleep(110);
+    }
+    const typeMetrics = await readMetrics();
+
+    /* then 8 backspaces */
+    await evalInPage("window.__perf.resetAt = performance.now(); true");
+    for (let i = 0; i < DELETES; i += 1) {
+      for (const type of ["rawKeyDown", "keyUp"]) {
+        await send("Input.dispatchKeyEvent", {
+          type,
+          key: "Backspace",
+          code: "Backspace",
+          windowsVirtualKeyCode: 8,
+          nativeVirtualKeyCode: 8,
+        });
+      }
+      await sleep(110);
+    }
+    await sleep(700);
+    const deleteMetrics = await readMetrics();
+    const valueAfterDeletes = await evalInPage(
+      "(() => { const el = document.querySelector('#user-id'); return el ? el.value : null; })()",
+    );
+
+    const expectedAfterDeletes = TYPED.slice(0, TYPED.length - DELETES);
+    record(
+      `login: delete stays responsive on a throttled CPU (x${THROTTLE})`,
+      deleteMetrics.maxFrameGap < FRAME_GAP_BUDGET_MS && valueAfterDeletes === expectedAfterDeletes,
+      {
+        throttle: THROTTLE,
+        budgetMs: FRAME_GAP_BUDGET_MS,
+        expectedAfterDeletes,
+        typeMaxFrameGap: Math.round(typeMetrics.maxFrameGap),
+        deleteMaxFrameGap: Math.round(deleteMetrics.maxFrameGap),
+        deleteLongTasks: deleteMetrics.longTaskCount,
+        deleteTotalLongTask: deleteMetrics.totalLongTask,
+        deleteMaxLongTask: deleteMetrics.maxLongTask,
+        valueAfterDeletes,
+      },
+    );
 
     console.log(JSON.stringify(results, null, 2));
     const failed = results.checks.filter((c) => !c.pass);

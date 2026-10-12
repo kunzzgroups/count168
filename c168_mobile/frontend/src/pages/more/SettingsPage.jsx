@@ -5,11 +5,13 @@ import MobileSubpageHeader from "../../components/layout/MobileSubpageHeader.jsx
 import MobileLangSwitch from "../../components/layout/MobileLangSwitch.jsx";
 import MobileThemeSwitch from "../../components/layout/MobileThemeSwitch.jsx";
 import MobileOnOffSwitch from "../../components/layout/MobileOnOffSwitch.jsx";
+import { PinSetupModal, usePinSetup } from "../../components/lock/PinSetupModal.jsx";
 import { fetchJson } from "../../lib/fetchJson.js";
 import { useSyncedLoginLang, writeLoginLang } from "../../lib/loginLang.js";
 import { clearLastCompanyId } from "../../lib/lastLoginPrefs.js";
 import { readLoginTheme, writeLoginTheme } from "../../lib/loginTheme.js";
 import { MORE_I18N } from "../../translateFile/moreTranslate.js";
+import { pinText } from "../../translateFile/pinTranslate.js";
 import { buildApiUrl } from "../../utils/apiUrl.js";
 import {
   biometryInfo,
@@ -34,6 +36,7 @@ import {
   saveSettings,
 } from "../../lib/biometricSettings.js";
 import { registerDeviceToken, revokeDeviceToken } from "../../lib/deviceTokenApi.js";
+import { clearPin, isPinSupported, pinEnabled } from "../../lib/pinStore.js";
 import {
   createPasskey,
   hasPasskeyOnDevice,
@@ -108,6 +111,22 @@ export default function SettingsPage() {
   });
   const [bioDiag, setBioDiag] = useState("boot");
   const i18n = useMemo(() => MORE_I18N[lang] || MORE_I18N.en, [lang]);
+  const tp = useMemo(() => pinText(lang), [lang]);
+
+  /**
+   * PIN 解锁（4/6 位，见 lib/pinStore.js）。
+   *
+   * 与生物识别那一行**互相独立**：
+   *   · 生物识别关掉不会动 PIN（反之亦然）
+   *   · 打开生物识别会**清掉 PIN** —— 服务端同一设备只有一张设备令牌，
+   *     重新签发会换掉 PIN 密文里那一把，留着只会让 PIN 解锁报「设备已失效」。
+   * 这条规则写在 lib/biometricSettings.js 之外，因为它是**服务端数据模型**的后果。
+   */
+  const pinSetup = usePinSetup({ lang });
+  const [pinBusy, setPinBusy] = useState(false);
+  const [pinNotice, setPinNotice] = useState("");
+  const pinOn = pinSetup.state.enabled;
+  const pinSupported = useMemo(() => isPinSupported(), []);
 
   const setLang = useCallback((next) => {
     setLangState(writeLoginLang(next));
@@ -379,6 +398,13 @@ export default function SettingsPage() {
           return;
         }
         await saveToken(issued.token);
+        // 这次签发**换掉**了同一设备上的旧令牌（服务端按 (用户,设备,kind) 唯一），
+        // 而 PIN 密文里正是那把旧的 → 不清掉，用户下次用 PIN 会拿到「设备已失效」。
+        if (pinEnabled()) {
+          await clearPin();
+          pinSetup.refresh();
+          setPinNotice(tp.clearedByBiometric);
+        }
         // 重新开启 → 撕掉之前的拒绝标记
         clearBioOptOut();
         // 权威模型：开启 + 方式。方式保持不变；**没有方式时给一个明确默认**，
@@ -397,8 +423,30 @@ export default function SettingsPage() {
         setBioBusy(false);
       }
     },
-    [bioEnabled, bioMode, i18n.bioDeviceLimit, i18n.bioEnableFailed, lang],
+    [bioEnabled, bioMode, i18n.bioDeviceLimit, i18n.bioEnableFailed, lang, pinSetup, tp.clearedByBiometric],
   );
+
+  /**
+   * 关掉 PIN。
+   *
+   * 若本机**没有**生物识别凭据，说明那张设备令牌只服务于 PIN → 顺手吐销掉：
+   * 否则它会以“一条谁也用不了的记录”留在服务端直到过期。
+   * 有生物识别凭据时**绝不动它** —— 那是用户正在用的那把。
+   */
+  const turnOffPin = useCallback(async () => {
+    setPinBusy(true);
+    setPinNotice("");
+    try {
+      const credential = await withTimeout(loadToken(), 4000);
+      await clearPin();
+      if (!credential) await revokeDeviceToken({ deviceId: getDeviceId() });
+      pinSetup.refresh();
+    } catch {
+      setPinNotice(tp.setupSaveFailed);
+    } finally {
+      setPinBusy(false);
+    }
+  }, [pinSetup, tp.setupSaveFailed]);
 
   // 这一行只显示「标题 + on/off」（产品要求：不要多余说明文字），
   // 所以只需要算出标题。三种后端共用一行，标题跟着模式变，避免名不副实。
@@ -537,6 +585,74 @@ export default function SettingsPage() {
               </p>
             ) : null}
           </section>
+
+          {/*
+           * PIN 解锁：**独立于生物识别的第二个开关**。
+           *
+           * 为何要有它：这台手机没录指纹/人脸的用户，原来连门禁都没有 ——
+           * 每次冷启动都得重输账号密码。PIN 就是给他们的快捷入口。
+           * 开关本身只表示“开/关”，不写多余说明（与生物识别那一行保持一致），
+           * 只额外给一句“几位数”，因为改位数要重新设置。
+           */}
+          <section className="m-more-settings-group" aria-label={tp.settingLabel}>
+            <div className="m-more-settings-row">
+              <span>{tp.settingLabel}</span>
+              <div className="m-more-settings-inline">
+                {pinOn && !pinBusy && !pinSetup.busy ? (
+                  <button
+                    type="button"
+                    className="m-more-settings-inline-btn"
+                    onClick={() => pinSetup.openSetup("change")}
+                  >
+                    {tp.settingChange}
+                  </button>
+                ) : null}
+                {pinBusy || pinSetup.busy ? (
+                  <i className="fas fa-spinner fa-spin" aria-hidden="true" />
+                ) : (
+                  <MobileOnOffSwitch
+                    on={pinOn}
+                    disabled={!pinSupported}
+                    onChange={(next) => {
+                      setPinNotice("");
+                      if (next) pinSetup.openSetup(pinOn ? "change" : "set");
+                      else void turnOffPin();
+                    }}
+                    ariaLabel={tp.settingLabel}
+                    onLabel={i18n.bioOn || "On"}
+                    offLabel={i18n.bioOff || "Off"}
+                  />
+                )}
+              </div>
+            </div>
+
+            {pinOn ? (
+              <p className="m-more-settings-hint">
+                {pinSetup.state.len === 6 ? tp.settingHint6 : tp.settingHint4}
+              </p>
+            ) : null}
+
+            {/* 设备根本不支持（没有 WebCrypto）——宁可说清楚，也不降级成弱存储 */}
+            {!pinSupported ? <p className="m-more-settings-hint">{tp.setupNoCrypto}</p> : null}
+
+            {pinNotice ? <p className="m-more-settings-hint">{pinNotice}</p> : null}
+
+            {pinSetup.error && !pinSetup.open ? (
+              <p className="m-more-settings-hint m-more-settings-hint--error" role="alert">
+                {pinSetup.error}
+              </p>
+            ) : null}
+          </section>
+
+          <PinSetupModal
+            open={pinSetup.open}
+            mode={pinSetup.mode}
+            busy={pinSetup.busy}
+            error={pinSetup.error}
+            lang={lang}
+            onSubmit={(pin, len) => void pinSetup.save(pin, len)}
+            onClose={pinSetup.close}
+          />
 
             <button type="button" className="m-more-logout tap-scale" onClick={() => void logout()}>
               <i className="fas fa-right-from-bracket" aria-hidden="true" />

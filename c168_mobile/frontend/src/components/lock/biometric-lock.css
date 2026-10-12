@@ -109,9 +109,212 @@
   background: rgba(13, 96, 255, 0.06);
 }
 
+/*
+ * PIN 卡片：键盘比按钮高得多，所以把卡片的内边距和外层 gap 收紧一点，
+ * 否则小屏（或大字体）上「返回登录」会被推到折叠线以下。
+ * 注意 .bio-lock 是 overflow-y:auto 且卡片 margin:auto —— 真的放不下时仍能滚动。
+ */
+.bio-lock__card--pin {
+  gap: 10px;
+  padding: 26px 20px 20px;
+}
+
+.bio-pin {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.bio-pin__dots {
+  display: flex;
+  gap: 12px;
+  height: 16px;
+  align-items: center;
+  justify-content: center;
+}
+
+.bio-pin__dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(13, 96, 255, 0.45);
+  background: transparent;
+  transition: background-color 120ms ease-out, transform 120ms ease-out;
+}
+
+.bio-pin__dot.is-on {
+  background: var(--m-color-primary, #0d60ff);
+  border-color: var(--m-color-primary, #0d60ff);
+  transform: scale(1.05);
+}
+
+/* 输了但没通过：抖一下（配 420ms 的 class 开关，见 PinPad.jsx） */
+.bio-pin__dots.is-shaking {
+  animation: bio-pin-shake 400ms ease-in-out both;
+}
+
+@keyframes bio-pin-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20% {
+    transform: translateX(-7px);
+  }
+  40% {
+    transform: translateX(7px);
+  }
+  60% {
+    transform: translateX(-4px);
+  }
+  80% {
+    transform: translateX(4px);
+  }
+}
+
+/* 错误行：高度固定，否则「出错时卡片变高」会让整张卡跳一下 */
+.bio-pin__status {
+  margin: 0;
+  min-height: 34px;
+  font-size: 0.8125rem;
+  line-height: 1.35;
+  color: var(--m-color-muted, #64748b);
+}
+
+.bio-pin__grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  width: 100%;
+  max-width: 250px;
+  margin: 0 auto;
+}
+
+.bio-pin__key {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* 高度写死（不用 aspect-ratio）：键盘总高可预测，卡片布局不会忽高忽低 */
+  height: 48px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--m-color-primary-soft, #e8efff);
+  color: var(--m-color-text, #1e293b);
+  font-family: inherit;
+  font-size: 1.25rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.bio-pin__key:active {
+  background: rgba(13, 96, 255, 0.18);
+}
+
+.bio-pin__key:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.bio-pin__key--delete {
+  background: transparent;
+  color: var(--m-color-muted, #64748b);
+  font-size: 1.0625rem;
+}
+
+.bio-pin__key--spacer {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .bio-lock__card {
     animation: bio-lock-in 220ms ease-out both;
+  }
+}
+
+/*
+ * 设置 PIN 的弹窗。
+ *
+ * 它在登录页与设置页都要用，所以复用 styles/login.css 里那套
+ * `sc-login-modal-*`（弹窗全站长一个样），只补三件事：
+ *   1. 图标改成品牌蓝（那套样式的图标默认是**危险色红** —— 因为它是为
+ *      “登录失败” 的弹窗写的，而设置 PIN 不是错误）
+ *   2. 内容比原来的弹窗高得多（键盘 4 行），小屏要能滚动，否则
+ *      「取消」永远在屏幕外
+ *   3. 键盘宽度与弹窗内边距对齐
+ */
+.sc-login-modal-box--pin {
+  padding: 24px 20px 20px;
+}
+
+/* 内容变高：把居中改成“空间够则居中、不够则从顶部开始且可滚动”。
+   不用 :has() —— 老一点的安卓 WebView 不认，规则会被整条丢掉。 */
+.sc-login-modal-overlay--pin {
+  display: flex;
+  overflow-y: auto;
+  align-items: flex-start;
+}
+
+.sc-login-modal-box--pin {
+  margin: auto;
+  max-width: 360px;
+}
+
+.pin-setup {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.pin-setup .sc-login-modal-icon-wrap {
+  background: var(--m-color-primary-soft, #e8efff);
+}
+
+.pin-setup .sc-login-modal-icon {
+  color: var(--m-color-primary, #0d60ff);
+}
+
+.pin-setup .sc-login-modal-title {
+  margin-bottom: 8px;
+}
+
+.pin-setup .sc-login-modal-message {
+  margin-bottom: 14px;
+  font-size: 0.875rem;
+}
+
+.pin-setup__lengths {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.pin-setup__length {
+  min-width: 96px;
+  padding: 8px 14px;
+  border: 1px solid rgba(13, 96, 255, 0.35);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--m-color-primary-soft-text, #1d4ed8);
+  font-family: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.pin-setup__length.is-on {
+  border-color: transparent;
+  background: var(--m-grad-brand, linear-gradient(180deg, #63c4ff, #0d60ff));
+  color: #fff;
+}
+
+/* 用户开了「减少动效」：抖动也不要 */
+@media (prefers-reduced-motion: reduce) {
+  .bio-pin__dots.is-shaking {
+    animation: none;
   }
 }
 
