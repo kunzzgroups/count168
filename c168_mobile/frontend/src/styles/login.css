@@ -166,8 +166,7 @@ button.sc-login-lang-seg:hover {
 button.sc-login-lang-seg.active {
   color: #ffffff;
   text-shadow: 0 1px 4px rgba(30, 64, 175, 0.28);
-  /* no infinite `text-shadow` animation: repainting the label every frame is what helped make an
-     old phone's backspaces queue up. */
+  animation: sc-login-lang-text-breathe 1.8s ease-in-out infinite;
 }
 
 .sc-login-lang-thumb,
@@ -203,16 +202,16 @@ button.sc-login-lang-seg.active {
   height: 176%;
   pointer-events: none;
   transform: rotate(20deg);
-  /* `mix-blend-mode: screen` removed: it forces a blend of the layer on every frame of the sweep. */
   background: linear-gradient(
     90deg,
     rgba(255, 255, 255, 0) 0%,
     rgba(255, 255, 255, 0.62) 50%,
     rgba(255, 255, 255, 0) 100%
   );
-  mix-blend-mode: normal;
+  mix-blend-mode: screen;
   animation: sc-login-lang-shimmer 2.1s cubic-bezier(0.2, 0.8, 0.2, 1) infinite;
 }
+
 .sc-login-lang-switch:active .sc-login-lang-thumb,
 .sc-login-lang-ios:active .sc-login-lang-thumb,
 .sc-login-lang-ios:active .sc-login-lang-ios-thumb {
@@ -722,17 +721,23 @@ button.sc-login-lang-seg.active {
 @keyframes sc-login-lang-glow-breathe {
   0%,
   100% {
-    opacity: 0.55;
+    opacity: 0.62;
+    filter: blur(9px);
   }
   50% {
-    opacity: 0.95;
+    opacity: 0.98;
+    filter: blur(12px);
   }
 }
 
 @keyframes sc-login-lang-text-breathe {
-  /* Retired: it animated `text-shadow`, i.e. it repainted the label every frame. The active label
-     keeps the static shadow instead (see its rule). Kept as an empty keyframe-free comment so the
-     name is not silently reused. */
+  0%,
+  100% {
+    text-shadow: 0 1px 4px rgba(30, 64, 175, 0.28);
+  }
+  50% {
+    text-shadow: 0 1px 10px rgba(147, 197, 253, 0.85);
+  }
 }
 
 .sc-login-column {
@@ -895,141 +900,4 @@ body.bg .sc-login-input::placeholder {
 .sc-login-passkey-btn:disabled {
   opacity: 0.6;
   cursor: default;
-}
-
-/*
- * Build marker (bottom of the login column): `build <git sha> · MM-DD HH:mm`.
- * It exists so a bug report can be tied to the bundle the user is actually running — the phone app
- * is a remote SPA, so it keeps its old bundle until the page reloads, and "still broken" is often
- * "still the old bundle". Keep it tiny and unobtrusive.
- */
-.sc-login-build {
-  display: block;
-  margin: 10px auto 0;
-  padding: 3px 6px;
-  border: 0;
-  background: none;
-  font: inherit;
-  font-size: 9px;
-  line-height: 1.4;
-  letter-spacing: 0.02em;
-  color: rgba(255, 255, 255, 0.42);
-  cursor: pointer;
-  user-select: text;
-  -webkit-user-select: text;
-}
-
-/*
- * Device typing report, shown by tapping the build marker (see lib/typingProbe.js).
- * Deliberately plain monospace so it can be screenshotted and sent to support as-is.
- */
-.sc-login-diag {
-  margin: 6px auto 0;
-  max-width: 100%;
-  padding: 6px 8px;
-  border-radius: 8px;
-  background: rgba(2, 6, 23, 0.55);
-  color: rgba(255, 255, 255, 0.86);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 9px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
-  text-align: left;
-  user-select: text;
-  -webkit-user-select: text;
-}
-
-/*
- * While a field has focus the login page must not animate anything.
- *
- * Why: these are all infinite, decorative animations — a blur that re-rasterises every frame, a
- * text-shadow repaint, a blend-mode sweep. On an old Android phone they keep the raster/compositor
- * busy, and the user's keystrokes queue up behind them (reported with Sogou + an old phone:
- * "six backspaces before anything deletes"). Focused input = no animation, so typing and deleting
- * get the whole machine.
- *
- * The class is toggled by LoginPage on focusin/focusout.
- */
-body.is-typing .sc-login-lang-ios::after,
-body.is-typing .sc-login-lang-switch::after,
-body.is-typing .sc-login-lang-ios-thumb::before,
-body.is-typing .sc-login-lang-thumb::before,
-body.is-typing .sc-login-lang-ios .sc-login-lang-seg.active,
-body.is-typing .sc-login-lang-option.active,
-body.is-typing button.sc-login-lang-seg.active,
-body.is-typing .sc-login-maintenance-track {
-  animation: none !important;
-  transition: none !important;
-}
-
-/* Wrapper + link for the on-device diagnostics panel (lib/typingProbe.js). */
-.sc-login-diag-wrap {
-  display: block;
-  margin: 0 auto;
-}
-
-.sc-login-diag-link {
-  display: block;
-  margin: 4px auto 0;
-  font-size: 9px;
-  letter-spacing: 0.02em;
-  color: rgba(255, 255, 255, 0.55);
-  text-decoration: underline;
-}
-
-/*
- * Lite mode — `body.lite`, see src/lib/liteMode.js.
- *
- * Same layout, every expensive visual removed: the full-screen cover bitmap, the blurred glow layer,
- * gradients, shadows and the fade/marquee animations all become flat colour. Why: the app renders in
- * the device's Android System WebView (single process — page paint competes with the keyboard's own
- * calls), and the login page is where users type. Toggle per device with `?lite=1` / `?lite=0`, from
- * the diagnostics panel, or automatically once typing has been measured as slow there.
- */
-body.lite.bg,
-body.lite.bg #root {
-  background-image: none !important;
-  background-color: #0b1b3a !important;
-}
-
-body.lite .sc-login-lang-ios::after,
-body.lite .sc-login-lang-switch::after,
-body.lite .sc-login-lang-ios-thumb::before,
-body.lite .sc-login-lang-thumb::before {
-  display: none !important; /* blurred glow layer + blend-mode sweep */
-}
-
-body.lite .sc-login-card,
-body.lite .sc-login-card--secondary,
-body.lite .sc-login-lang-ios,
-body.lite .sc-login-lang-thumb,
-body.lite .sc-login-lang-ios-thumb,
-body.lite .sc-login-btn,
-body.lite .sc-login-submit-btn,
-body.lite .sc-login-lang-seg {
-  background-image: none !important;
-  box-shadow: none !important;
-  text-shadow: none !important;
-}
-
-body.lite .sc-login-card,
-body.lite .sc-login-card--secondary {
-  background: #ffffff !important;
-}
-
-body.lite .sc-login-lang-ios {
-  background: #eef3fb !important;
-}
-
-body.lite .sc-login-lang-thumb,
-body.lite .sc-login-lang-ios-thumb,
-body.lite .sc-login-submit-btn {
-  background: #2563eb !important;
-}
-
-body.lite .sc-login-shell,
-body.lite .sc-login-maintenance-track,
-body.lite .sc-login-maintenance-item {
-  animation: none !important;
 }

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useOverlayLock } from "../../hooks/useOverlayLock.js";
-import KeyboardOwnedInput from "../../components/KeyboardOwnedInput.jsx";
 import MoneyDecimal from "../../lib/money/moneyDecimal.js";
 import {
   buildClientRequestId,
@@ -107,8 +106,6 @@ function AccountPicker({
   const [query, setQuery] = useState("");
   const [windowSize, setWindowSize] = useState(OPTION_WINDOW_STEP);
   const searchRef = useRef(null);
-  /** Mirrors the field's own text; see `applyQuery`. */
-  const queryRef = useRef("");
 
   const rows = useMemo(() => (Array.isArray(options) ? options : []), [options]);
 
@@ -161,18 +158,16 @@ function AccountPicker({
     [growWindow],
   );
 
-  /**
-   * A new query starts the window over, so each keystroke mounts only one page of rows.
-   * The guard compares against a ref instead of `query`: the field is driven by native events
-   * (see the effect below), and a stale closure would silently drop a keystroke.
-   */
-  const applyQuery = useCallback((next) => {
-    const text = String(next ?? "");
-    if (text === queryRef.current) return;
-    queryRef.current = text;
-    setQuery(text);
-    setWindowSize(OPTION_WINDOW_STEP);
-  }, []);
+  /** A new query starts the window over, so each keystroke mounts only one page of rows. */
+  const applyQuery = useCallback(
+    (next) => {
+      const text = String(next ?? "");
+      if (text === query) return;
+      setQuery(text);
+      setWindowSize(OPTION_WINDOW_STEP);
+    },
+    [query],
+  );
 
   /**
    * The sheet needs to know while a panel is up: its `DateTapRow` overlays a native
@@ -190,7 +185,6 @@ function AccountPicker({
   const close = useCallback(() => {
     setPanelOpen(false);
     setQuery("");
-    queryRef.current = "";
     setWindowSize(OPTION_WINDOW_STEP);
   }, [setPanelOpen]);
 
@@ -254,15 +248,17 @@ function AccountPicker({
 
           <label className="m-tx-account-picker-search">
             <i className="fas fa-magnifying-glass" aria-hidden="true" />
-            {/* Shared component: the field is keyboard-owned (never written back by React) and
-                listened to through native events — see src/components/KeyboardOwnedInput.jsx for
-                the Android report this comes from. */}
-            <KeyboardOwnedInput
-              inputRef={searchRef}
-              onValueChange={applyQuery}
-              /* Sogou/中文输入法在旧机上会持续保持组合：组合期间把过滤合并到每 80ms 一次，
-                 并交给 React 以 transition 处理 —— 列表重渲染永远不会拖住键盘（用户报的
-                 “输入后按删除延迟”就是这么来的）。 */
+            {/*
+             * `onInput`/`onCompositionEnd` read the same DOM value as `onChange`: some phone
+             * keyboards only hand the text over when a word composition finishes.
+             */}
+            <input
+              ref={searchRef}
+              type="text"
+              value={query}
+              onChange={(e) => applyQuery(e.target.value)}
+              onInput={(e) => applyQuery(e.currentTarget.value)}
+              onCompositionEnd={(e) => applyQuery(e.currentTarget.value)}
               placeholder={searchPlaceholder}
               autoComplete="off"
               autoCorrect="off"
@@ -802,18 +798,15 @@ export default function AddTransactionSheet({
               </div>
               <div className="m-tx-form-field">
                 <label className="m-tx-form-label">{m.amount}</label>
-                {/* Keyboard-owned: the sanitised value lives in state and is applied on blur, so typing
-                    never has letters/extra dots written back under the caret (see KeyboardOwnedInput). */}
-                <KeyboardOwnedInput
-                  value={txAmount}
-                  initialValue={txAmount}
-                  onValueChange={(text) => {
-                    setTxFullAmount("");
-                    setTxAmount(sanitizeAmountInput(text));
-                  }}
-                  applyValueOnBlur
-                  disabled={mutationsBlocked}
+                <input
+                  type="text"
                   inputMode="decimal"
+                  value={txAmount}
+                  disabled={mutationsBlocked}
+                  onChange={(e) => {
+                    setTxFullAmount("");
+                    setTxAmount(sanitizeAmountInput(e.target.value));
+                  }}
                   className="m-tx-form-input"
                 />
               </div>
@@ -877,16 +870,15 @@ export default function AddTransactionSheet({
                       </option>
                     ))}
                   </select>
-                  <KeyboardOwnedInput
-                    value={rateCurrencyFromAmount}
-                    initialValue={rateCurrencyFromAmount}
-                    onValueChange={(text) => {
-                      setRateFullAmount("");
-                      setRateCurrencyFromAmount(sanitizeAmountInput(text));
-                    }}
-                    applyValueOnBlur
-                    disabled={mutationsBlocked}
+                  <input
+                    type="text"
                     inputMode="decimal"
+                    value={rateCurrencyFromAmount}
+                    disabled={mutationsBlocked}
+                    onChange={(e) => {
+                      setRateFullAmount("");
+                      setRateCurrencyFromAmount(sanitizeAmountInput(e.target.value));
+                    }}
                     placeholder={m.amount}
                     className="m-tx-form-input"
                     aria-label={m.fromAccount}
@@ -994,13 +986,12 @@ export default function AddTransactionSheet({
                   aria-label={m.rateMultiplier}
                 />
                 <div className="m-tx-form-grid-2">
-                  <KeyboardOwnedInput
-                    value={rateMiddlemanInputAmount}
-                    initialValue={rateMiddlemanInputAmount}
-                    onValueChange={(text) => setRateMiddlemanInputAmount(sanitizePositiveAmountInput(text))}
-                    applyValueOnBlur
-                    disabled={mutationsBlocked}
+                  <input
+                    type="text"
                     inputMode="decimal"
+                    value={rateMiddlemanInputAmount}
+                    disabled={mutationsBlocked}
+                    onChange={(e) => setRateMiddlemanInputAmount(sanitizePositiveAmountInput(e.target.value))}
                     onKeyDown={(e) => {
                       if (e.key === "-" || e.key === "Subtract") e.preventDefault();
                     }}
@@ -1008,13 +999,12 @@ export default function AddTransactionSheet({
                     className="m-tx-form-input"
                     aria-label={m.fee}
                   />
-                  <KeyboardOwnedInput
-                    value={rateMiddlemanPlatformFee}
-                    initialValue={rateMiddlemanPlatformFee}
-                    onValueChange={(text) => setRateMiddlemanPlatformFee(sanitizePlatformFeeInput(text))}
-                    applyValueOnBlur
-                    disabled={mutationsBlocked}
+                  <input
+                    type="text"
                     inputMode="decimal"
+                    value={rateMiddlemanPlatformFee}
+                    disabled={mutationsBlocked}
+                    onChange={(e) => setRateMiddlemanPlatformFee(sanitizePlatformFeeInput(e.target.value))}
                     placeholder={m.platformFee}
                     className="m-tx-form-input"
                     aria-label={m.platformFee}
@@ -1037,18 +1027,10 @@ export default function AddTransactionSheet({
           {!isRate ? (
             <div className="m-tx-form-field">
               <label className="m-tx-form-label">{m.remark}</label>
-              {/*
-               * Keyboard-owned: this is the field users type Chinese into. A controlled value would be
-               * written back while the IME still owns the text, which desynchronises the keyboard's own
-               * buffer — the reported "the first backspace does nothing". No composition forcing here:
-               * candidate selection must keep working.
-               */}
-              <KeyboardOwnedInput
+              <textarea
                 value={txRemark}
-                initialValue={txRemark}
-                onValueChange={setTxRemark}
                 disabled={mutationsBlocked}
-                multiline
+                onChange={(e) => setTxRemark(e.target.value)}
                 rows={2}
                 className="m-tx-form-textarea"
               />

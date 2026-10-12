@@ -1,10 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useOverlayLock } from "../../hooks/useOverlayLock.js";
-import { useIncrementalList } from "../../hooks/useIncrementalList.js";
 import { buildAccountScopeDraft } from "../../lib/mobileAccountScope.js";
 import { formatDisplayDate } from "../../lib/dashboardDateUtils.js";
 import PasswordInput from "../../components/PasswordInput.jsx";
-import KeyboardOwnedInput from "../../components/KeyboardOwnedInput.jsx";
 import "../transaction/add-transaction-sheet.css";
 
 /* Same iOS-safe pattern as AddTransactionSheet: visible formatted row,
@@ -399,13 +397,9 @@ export function AccountFormSheet({ open, onClose, account, onLinkAccount }) {
           />
         </FormField>
         <FormField label={i18n.remark}>
-          {/* Keyboard-owned (see KeyboardOwnedInput): the remark is prose and often Chinese, so React
-              must never write its value back while the IME owns the composition. */}
-          <KeyboardOwnedInput
+          <textarea
             value={form.remark}
-            initialValue={form.remark}
-            onValueChange={(text) => update("remark", text)}
-            multiline
+            onChange={(e) => update("remark", e.target.value)}
             style={{ textTransform: "uppercase" }}
           />
         </FormField>
@@ -515,12 +509,6 @@ export function LinkAccountSheet({ open, onClose, account }) {
   const rows = account.linkPool.filter((row) =>
     `${row.account_id || ""} ${row.name || ""}`.toUpperCase().includes(query.toUpperCase()),
   );
-  /**
-   * Accounts can run into the thousands. Rendering the whole match set means every keystroke in the
-   * search box re-renders all of it (measured: this is what makes filtering feel heavy on a phone),
-   * so a page at a time is mounted and the rest follows as the list is scrolled.
-   */
-  const pagedRows = useIncrementalList(rows, 60);
   return (
     <Sheet
       open={open}
@@ -557,14 +545,10 @@ export function LinkAccountSheet({ open, onClose, account }) {
       </div>
       <div className="m-account-sheet-search">
         <i className="fas fa-magnifying-glass" aria-hidden="true" />
-        <KeyboardOwnedInput
-          value={query}
-          onValueChange={setQuery}
-          placeholder={i18n.searchAccounts}
-        />
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={i18n.searchAccounts} />
       </div>
       <div className="m-account-check-list">
-        {pagedRows.visible.map((row) => (
+        {rows.map((row) => (
           <label key={row.id}>
             <input
               type="checkbox"
@@ -586,9 +570,6 @@ export function LinkAccountSheet({ open, onClose, account }) {
             <em>{row.role}</em>
           </label>
         ))}
-        {pagedRows.hasMore ? (
-          <div ref={pagedRows.sentinelRef} className="m-sheet-sentinel" aria-hidden="true" />
-        ) : null}
       </div>
     </Sheet>
   );

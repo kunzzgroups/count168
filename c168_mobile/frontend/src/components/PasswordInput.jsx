@@ -1,8 +1,4 @@
 import { forwardRef, useState } from "react";
-import KeyboardOwnedInput from "./KeyboardOwnedInput.jsx";
-
-/** Idle time after which a paused IME composition is committed — see KeyboardOwnedInput. */
-export const COMPOSITION_COMMIT_MS = 800;
 
 export function PasswordVisibilityIcon({ visible }) {
   return (
@@ -38,14 +34,6 @@ const PasswordInput = forwardRef(function PasswordInput(
     visible: visibleProp,
     onVisibleChange,
     defaultVisible = false,
-    /** Fields that never take Chinese text can hand their composition over to the field on a pause. */
-    commitCompositionOnIdleMs = 0,
-    /** …or on every keystroke (the `always` mode of lib/compositionCommit.js). */
-    commitCompositionOnInput = false,
-    /** …or the moment a delete key is pressed (the default; see KeyboardOwnedInput). */
-    commitCompositionOnDeleteKey = true,
-    /** …by ending the IME session (blur + focus) instead of moving the caret. */
-    commitCompositionByRefocus = false,
     showLabel = "Show password",
     hideLabel = "Hide password",
     className = "",
@@ -71,22 +59,13 @@ const PasswordInput = forwardRef(function PasswordInput(
           自动首字母大写、自动更正全都还在，密码会被转成汉字 / 首字母变大写，
           用户只看到“登录失败”（不同输入法表现不同，所以是“一部分用户”）。
           用原生 password 类型后系统会切到安全输入模式：无候选、无更正、不学词，
-          密码管理器也认得。显示密码时才切回 text（此时用户主动要看到内容）。
-
-          字段本身交给 KeyboardOwnedInput：密码是安卓丢字报障最多的一个（用户
-          描述“打不进去/要删一个字”），受控 value= 会在重渲染时把键盘刚写的字
-          回写覆盖。本组件已用于登录/二级密码/账号/域名等 8 处，改这里全都受益。 */}
-      <KeyboardOwnedInput
-        inputRef={ref}
+          密码管理器也认得。显示密码时才切回 text（此时用户主动要看到内容）。 */}
+      <input
+        ref={ref}
         type={visible ? "text" : "password"}
         className={[className, visible ? "" : "ec-password-masked"].filter(Boolean).join(" ")}
-        initialValue={value ?? ""}
         value={value}
-        commitCompositionOnIdleMs={commitCompositionOnIdleMs}
-        commitCompositionOnInput={commitCompositionOnInput}
-        commitCompositionOnDeleteKey={commitCompositionOnDeleteKey}
-        commitCompositionByRefocus={commitCompositionByRefocus}
-        onValueChange={(text) => onChange?.({ target: { value: text } })}
+        onChange={onChange}
         disabled={disabled}
         spellCheck={false}
         autoCapitalize="none"

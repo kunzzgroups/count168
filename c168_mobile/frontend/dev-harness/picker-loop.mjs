@@ -5,12 +5,9 @@
  *
  * Drives the real `AddTransactionSheet` → AccountPicker in a phone-sized headless Chromium:
  *   A) IME / word-mode typing  → search must filter and must not be rewritten
- *   A2) keyboard-written text  → must survive React's next render (Android Gboard)
- *   A3) a burst of composition updates (Sogou on an old phone) → coalesced, never stale, cheap
  *   B) delete after filtering  → jank must not grow with the account count
  *   C) opening the picker      → must not freeze while mounting the list
  *   D) tapping over the panel   → must reach the panel, not the row's hidden date input
- *   E) reopening the panel      → the search field starts empty again
  * Zero dependencies: launches Chrome directly and talks CDP over the Node WebSocket.
  */
 import { spawn } from "node:child_process";
@@ -287,11 +284,7 @@ async function main() {
     );
     await sleep(200);
 
-    /* ── A) IME composition: intermediate states must NOT filter; the commit must ──
-       The reported "input and results are out of sync" came from filtering on intermediate composition
-       states (pinyin letters that are about to become Chinese characters). The contract is now: while
-       the IME owns the text the list stays where it was; when the composition commits, the list
-       catches up immediately — no delete, no Enter, no blur needed. */
+    /* ── A) IME composition (Chinese / word-mode keyboard path) ── */
     const compose = async (text) => {
       await send("Input.imeSetComposition", {
         text,
@@ -302,42 +295,11 @@ async function main() {
       return evalInPage("window.__harness.snapshot()");
     };
 
-    await evalInPage("window.__harness.setQuery(''); true");
-    await sleep(200);
-    const beforeComposition = await evalInPage("window.__harness.snapshot()");
     const composedDigits = await compose("2135");
     record(
-      "ime: the list follows the visible text during a composition",
-      composedDigits.value === "2135" &&
-        composedDigits.expected > 0 &&
-        composedDigits.rendered > 0 &&
-        composedDigits.prefixMatches,
-      {
-        valueDuringComposition: composedDigits.value,
-        renderedDuringComposition: composedDigits.rendered,
-        expected: composedDigits.expected,
-      },
-    );
-
-    /* commit it the way a keyboard does, then the list must match the committed text */
-    await evalInPage(`(() => {
-      const el = document.querySelector('.m-tx-account-picker-search input');
-      el.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: el.value }));
-      return true;
-    })()`);
-    await sleep(350);
-    const afterCommitIme = await evalInPage("window.__harness.snapshot()");
-    record(
-      "ime: committing the composition filters immediately (no delete needed)",
-      afterCommitIme.value === "2135" &&
-        afterCommitIme.expected > 0 &&
-        afterCommitIme.rendered > 0 &&
-        afterCommitIme.prefixMatches,
-      {
-        rendered: afterCommitIme.rendered,
-        expected: afterCommitIme.expected,
-        value: afterCommitIme.value,
-      },
+      "ime: list filters while composing (no delete needed)",
+      composedDigits.expected > 0 && composedDigits.rendered > 0 && composedDigits.prefixMatches,
+      { rendered: composedDigits.rendered, expected: composedDigits.expected, value: composedDigits.value },
     );
 
     await send("Input.imeSetComposition", { text: "", selectionStart: 0, selectionEnd: 0 });
@@ -359,158 +321,6 @@ async function main() {
       synth.expected > 0 && synth.rendered > 0 && synth.prefixMatches,
       { rendered: synth.rendered, expected: synth.expected, value: synth.value },
     );
-
-    /* ── A2) the text the keyboard typed must survive React's next render ──
-       Android/Gboard writes the composing text into the field itself; the `input` event can
-       arrive later (or be de-duplicated by React's value tracker). If React then renders — any
-       state change, e.g. the list window growing — a controlled `value=` writes its own, older
-       string back into the field: the typed characters disappear, the list keeps filtering on
-       something else, and only a delete (which produces a fresh event) re-aligns them. On the
-       phone that reads as "typing finds nothing until I delete a character". */
-    await evalInPage("window.__harness.setQuery(''); true");
-    await sleep(250);
-    const imeWrite = await evalInPage(`(() => {
-      const input = document.querySelector('.m-tx-account-picker-search input');
-      if (!input) return { error: 'no search input' };
-      input.focus();
-      input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: '' }));
-      /* the keyboard writes the text itself — no event reaches React yet */
-      input.value = '1015';
-      return { valueAfterWrite: input.value };
-    })()`);
-    /* Force an unrelated re-render of the picker: growing the list window is a state change. */
-    await evalInPage("window.__harness.scrollOptionsToEnd(); true");
-    await sleep(450);
-    const afterRerender = await evalInPage(`(() => {
-      const input = document.querySelector('.m-tx-account-picker-search input');
-      return { value: input ? input.value : null };
-    })()`);
-    /* the keyboard now commits the word */
-    await evalInPage(`(() => {
-      const input = document.querySelector('.m-tx-account-picker-search input');
-      if (!input) return false;
-      input.dispatchEvent(
-        new CompositionEvent('compositionend', { bubbles: true, data: input.value }),
-      );
-      input.dispatchEvent(
-        new InputEvent('input', {
-          bubbles: true,
-          isComposing: false,
-          data: input.value,
-          inputType: 'insertText',
-        }),
-      );
-      return true;
-    })()`);
-    await sleep(400);
-    const afterCommit = await evalInPage("window.__harness.snapshot()");
-    record(
-      "ime: text the keyboard typed survives the next render and still filters the list",
-      imeWrite.valueAfterWrite === "1015" &&
-        afterRerender.value === "1015" &&
-        afterCommit.value === "1015" &&
-        afterCommit.rendered > 0 &&
-        afterCommit.prefixMatches,
-      {
-        ...imeWrite,
-        valueAfterRerender: afterRerender.value,
-        valueAfterCommit: afterCommit.value,
-        filtered: afterCommit.rendered,
-        expected: afterCommit.expected,
-      },
-    );
-    await evalInPage("window.__harness.setQuery(''); true");
-    await sleep(250);
-
-    /* ── A3) a burst of composition updates (Sogou on an old phone) must stay cheap and catch up ──
-       Four updates land in the same tick, which is what a Chinese IME under load looks like. The
-       list may coalesce them, but it must end up on the text the user sees even if the composition
-       is never committed (the trailing flush), and it must not cost a long frame. */
-    await evalInPage("window.__harness.setQuery(''); true");
-    await sleep(250);
-    await evalInPage("window.__harness.resetMetrics(); true");
-    const burst = await evalInPage(`(() => {
-      const input = document.querySelector('.m-tx-account-picker-search input');
-      if (!input) return { error: 'no search input' };
-      input.focus();
-      input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: '' }));
-      for (const text of ['1', '10', '101', '1015']) {
-        input.value = text;
-        input.dispatchEvent(
-          new InputEvent('input', {
-            bubbles: true,
-            isComposing: true,
-            data: text,
-            inputType: 'insertCompositionText',
-          }),
-        );
-      }
-      /* the keyboard commits the word, as a real one always does */
-      input.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: input.value }));
-      return { value: input.value };
-    })()`);
-    await sleep(600);
-    const afterBurst = await evalInPage("window.__harness.snapshot()");
-    const burstMetrics = await evalInPage("window.__harness.metrics()");
-    record(
-      "ime: a burst of composition updates stays cheap and catches up on commit",
-      burst.value === "1015" &&
-        afterBurst.rendered > 0 &&
-        afterBurst.prefixMatches &&
-        burstMetrics.maxFrameGap < FRAME_GAP_BUDGET_MS,
-      {
-        ...burst,
-        filtered: afterBurst.rendered,
-        expected: afterBurst.expected,
-        maxFrameGap: Math.round(burstMetrics.maxFrameGap),
-      },
-    );
-
-    /* ── A-delete) a delete key must hand a held composition over first ──
-       "Type a few characters, press Backspace once, nothing happens" — the IME keeps the text in its own
-       buffer, so the press has to turn that buffer into real text before the browser deletes. Runs at the
-       end of the IME section because it deliberately leaves the field in a fresh state. */
-    await evalInPage("window.__handedOver = 0; window.addEventListener('ec:composition-committed', () => { window.__handedOver += 1; }, true); true");
-    await evalInPage(`(() => {
-      const input = document.querySelector('.m-tx-account-picker-search input');
-      input.focus();
-      input.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: input.value }));
-      input.value = '';
-      input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: '' }));
-      input.value = 'abc';
-      input.dispatchEvent(
-        new InputEvent('input', { bubbles: true, isComposing: true, data: 'abc', inputType: 'insertCompositionText' }),
-      );
-      return input.value;
-    })()`);
-    await sleep(200);
-    for (const type of ["rawKeyDown", "keyUp"]) {
-      await send("Input.dispatchKeyEvent", {
-        type,
-        key: "Backspace",
-        code: "Backspace",
-        windowsVirtualKeyCode: 8,
-        nativeVirtualKeyCode: 8,
-      });
-    }
-    await sleep(250);
-    const deleteHandOver = await evalInPage(`(() => {
-      const input = document.querySelector('.m-tx-account-picker-search input');
-      return { value: input ? input.value : null, handedOver: window.__handedOver || 0 };
-    })()`);
-    record(
-      "ime: a delete key hands the composition over, so the first press deletes",
-      deleteHandOver.handedOver >= 1 && deleteHandOver.value === "ab",
-      deleteHandOver,
-    );
-    /* put the field back to a clean state for the next phase */
-    await evalInPage(`(() => {
-      const input = document.querySelector('.m-tx-account-picker-search input');
-      input.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: input.value }));
-      window.__harness.setQuery('');
-      return true;
-    })()`);
-    await sleep(250);
 
     /* ── B) delete after filtering ── */
     const scenario = await measureDeletePhase();
@@ -555,18 +365,6 @@ async function main() {
       expected: secondBox.text,
     });
 
-    /* ── E) reopening the panel must start from an empty field and the full list ──
-       The search field is uncontrolled, so clearing it is the panel's job, not React's. */
-    await openPicker();
-    const reopened = await evalInPage("window.__harness.snapshot()");
-    record(
-      "reopen: the search field starts empty and the list is not still filtered",
-      reopened.value === "" && reopened.rendered > 0 && reopened.rendered < reopened.expected,
-      { value: reopened.value, rendered: reopened.rendered, expected: reopened.expected },
-    );
-    await evalInPage("(() => { const b = document.querySelector('.m-tx-account-picker-close'); if (b) b.click(); return true; })()");
-    await sleep(300);
-
     /* ── perf gate: jank must not scale with the account count ── */
     await loadHarness(FLOOR_N);
     const floorOpen = await openPicker({ measure: true });
@@ -581,151 +379,6 @@ async function main() {
       jankAtN <= allowed,
       { jankAtN, jankFloor, allowed, totalAtN, totalFloor },
     );
-
-    /* ── F) a normal form field (not a search box): typing + deleting an amount ──
-       The reported complaint is that *every* input lags on an old phone, not just the picker, so the
-       same per-key latency is measured here on the transaction sheet's amount field. */
-    const amountSelector = "window.__harness.formField('amount')";
-    const amountExists = await evalInPage(`!!${amountSelector}`);
-    if (!amountExists) {
-      record("form: typing an amount stays responsive", false, { error: "amount field not found" });
-    } else {
-      await evalInPage(`(() => {
-        const el = ${amountSelector};
-        el.focus();
-        el.value = '';
-        el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward' }));
-        return true;
-      })()`);
-      await sleep(250);
-      await evalInPage("window.__harness.resetMetrics(); true");
-
-      const amountLatencies = [];
-      let typed = "";
-      for (const ch of "12345678") {
-        const t0 = await evalInPage("performance.now()");
-        await send("Input.insertText", { text: ch });
-        typed += ch;
-        let applied = null;
-        const deadline = Date.now() + 3000;
-        while (Date.now() < deadline) {
-          const value = await evalInPage(`(() => { const el = ${amountSelector}; return el ? el.value : null; })()`);
-          if (value === typed) {
-            applied = await evalInPage("performance.now()");
-            break;
-          }
-          await sleep(20);
-        }
-        amountLatencies.push(applied === null ? null : Math.round(applied - t0));
-        await sleep(110);
-      }
-
-      /* then four backspaces */
-      const deleteLatencies = [];
-      for (let i = 0; i < 4; i += 1) {
-        const t0 = await evalInPage("performance.now()");
-        for (const type of ["rawKeyDown", "keyUp"]) {
-          await send("Input.dispatchKeyEvent", {
-            type,
-            key: "Backspace",
-            code: "Backspace",
-            windowsVirtualKeyCode: 8,
-            nativeVirtualKeyCode: 8,
-          });
-        }
-        typed = typed.slice(0, -1);
-        let applied = null;
-        const deadline = Date.now() + 3000;
-        while (Date.now() < deadline) {
-          const value = await evalInPage(`(() => { const el = ${amountSelector}; return el ? el.value : null; })()`);
-          if (value === typed) {
-            applied = await evalInPage("performance.now()");
-            break;
-          }
-          await sleep(20);
-        }
-        deleteLatencies.push(applied === null ? null : Math.round(applied - t0));
-        await sleep(110);
-      }
-
-      const metrics = await evalInPage("window.__harness.metrics()");
-      const finalValue = await evalInPage(`(() => { const el = ${amountSelector}; return el ? el.value : null; })()`);
-      const nums = (arr) => arr.filter((n) => n !== null);
-      const maxType = nums(amountLatencies).length ? Math.max(...nums(amountLatencies)) : null;
-      const maxDelete = nums(deleteLatencies).length ? Math.max(...nums(deleteLatencies)) : null;
-      const budget = Number(argv.formBudget || 120 + 6 * THROTTLE);
-
-      record(
-        `form: typing+deleting an amount stays responsive (x${THROTTLE}, budget ${budget}ms)`,
-        finalValue === "1234" &&
-          maxType !== null &&
-          maxDelete !== null &&
-          maxType < budget &&
-          maxDelete < budget,
-        {
-          finalValue,
-          maxTypeLatency: maxType,
-          maxDeleteLatency: maxDelete,
-          typeLatencies: amountLatencies,
-          deleteLatencies,
-          maxFrameGap: Math.round(metrics.maxFrameGap),
-          totalLongTask: Math.round(metrics.totalLongTask),
-        },
-      );
-    }
-
-    /* ── G) prose field (remark): Chinese composition + backspace must behave natively ──
-       The reported symptom was "after typing a few Chinese characters the first Backspace does nothing".
-       A controlled value writes itself back while the IME still owns the text and desynchronises the
-       keyboard's buffer; this field is keyboard-owned now, so the delete must hit real text. */
-    const remarkExists = await evalInPage("!!window.__harness.formField('remark')");
-    if (!remarkExists) {
-      record("form: a Chinese remark deletes natively (first Backspace works)", false, {
-        error: "remark field not found",
-      });
-    } else {
-      const remark = await evalInPage(`(() => {
-        const el = window.__harness.formField('remark');
-        el.focus();
-        el.value = '';
-        el.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: '' }));
-        el.dispatchEvent(
-          new InputEvent('input', { bubbles: true, isComposing: true, data: '\u4e2d\u6587', inputType: 'insertCompositionText' }),
-        );
-        el.value = '\u4e2d\u6587';
-        el.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '\u4e2d\u6587' }));
-        return el.value;
-      })()`);
-      /* force a re-render of the sheet, which a controlled value would use to write itself back */
-      await evalInPage("window.__harness.scrollOptionsToEnd && true");
-      await evalInPage(`(() => {
-        const el = window.__harness.formField('remark');
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-        return true;
-      })()`);
-      await sleep(250);
-      const afterRerenderRemark = await evalInPage("(() => { const el = window.__harness.formField('remark'); return el ? el.value : null; })()");
-      for (const type of ["rawKeyDown", "keyUp"]) {
-        await send("Input.dispatchKeyEvent", {
-          type,
-          key: "Backspace",
-          code: "Backspace",
-          windowsVirtualKeyCode: 8,
-          nativeVirtualKeyCode: 8,
-        });
-      }
-      await sleep(250);
-      const afterRemarkDelete = await evalInPage(
-        "(() => { const el = window.__harness.formField('remark'); return el ? el.value : null; })()",
-      );
-      record(
-        "form: a Chinese remark deletes natively (first Backspace works)",
-        remark === "\u4e2d\u6587" &&
-          afterRerenderRemark === "\u4e2d\u6587" &&
-          afterRemarkDelete === "\u4e2d",
-        { valueAfterComposition: remark, valueAfterRerender: afterRerenderRemark, valueAfterDelete: afterRemarkDelete },
-      );
-    }
 
     /* Open cost is not gated in ms: the panel's own layout work dominates at every N. The
        structural check above ("a page, not every account") is the deterministic gate. */

@@ -10,10 +10,6 @@ import { extractPlainTextFromRichText } from "../../utils/content/richTextSaniti
 import { isNative } from "../../lib/biometricStore.js";
 import { useBiometricEnrol, BiometricEnrolModal } from "../../components/lock/BiometricEnrolModal.jsx";
 import { readLastCompanyId, writeLastCompanyId } from "../../lib/lastLoginPrefs.js";
-import KeyboardOwnedInput from "../../components/KeyboardOwnedInput.jsx";
-import { commitProps, nextCommitMode, readCommitMode, writeCommitMode } from "../../lib/compositionCommit.js";
-import { formatTypingReport, readTypingReport, startTypingProbe } from "../../lib/typingProbe.js";
-import { applyLiteMode, isLiteMode, noteTypingReport, setLiteMode } from "../../lib/liteMode.js";
 import { onBrandLogoError } from "../../lib/brandAssets.js";
 
 // 登录页 logo：先播拼图动图（webp，54 帧），放完换成静态图。
@@ -21,9 +17,6 @@ import { onBrandLogoError } from "../../lib/brandAssets.js";
 // 切过去和静态图长得一样，肉眼看不到跳变。
 const LOGO_ANIMATION_MS = 2500;
 const LOGO_ANIM = "/images/count_logo_puzzle_animation.webp";
-
-/** Injected by vite.config.js (`define`) — see that function for why the login page shows it. */
-const BUILD_ID = typeof __BUILD_ID__ !== "undefined" ? __BUILD_ID__ : "dev";
 const LOGO_STATIC = "/images/count_logo.webp";
 
 function initialLogoSrc() {
@@ -63,24 +56,13 @@ const SILENT_PASSKEY_CODES = new Set([
 /** Uppercase display via CSS; keep raw value while typing so caret stays put. */
 function useUppercaseField(initial = "") {
   const [value, setValue] = useState(initial);
-  /**
-   * The text as it is right now. Typing writes **only** this: a keystroke must not re-render the
-   * login page, because on an old phone that render is exactly what the phone's keyboard ends up
-   * waiting for (the reported "backspaces queue up").
-   *
-   * State catches up on blur — which is also where the value gets upper-cased — and `onSubmit` reads
-   * `valueRef.current`, so what is sent is what the user typed and not what React last rendered.
-   */
-  const valueRef = useRef(initial);
 
-  const onValueChange = useCallback((text) => {
-    valueRef.current = String(text ?? "");
+  const onChange = useCallback((e) => {
+    setValue(e.target.value);
   }, []);
 
   const onBlur = useCallback((e) => {
-    const next = e.target.value.toUpperCase();
-    valueRef.current = next;
-    setValue(next);
+    setValue(e.target.value.toUpperCase());
   }, []);
 
   const onFocus = useCallback((e) => {
@@ -92,27 +74,12 @@ function useUppercaseField(initial = "") {
 
   return {
     value,
-    /** Always current — read this when submitting. */
-    valueRef,
     setValue,
-    /*
-     * The field is KeyboardOwnedInput: uncontrolled, so React never writes into it while the phone's
-     * keyboard owns the text (that write-back is what made Android users lose characters here —
-     * "打不进去 / 要删一个字才出现"). `value` is only adopted when it changes deliberately (the
-     * prefill, or the blur-time upper-casing below).
-     */
     fieldProps: {
       value,
-      initialValue: value,
-      onValueChange,
+      onChange,
       onBlur,
       onFocus,
-      /*
-       * Company id / username are codes: they never hold Chinese text, so a composition the keyboard
-       * keeps open is handed to the field (see lib/compositionCommit.js for how eagerly, and
-       * KeyboardOwnedInput for why: tapping out of a field clears the IME's buffer, after which a
-       * delete is immediate — this automates exactly that).
-       */
       autoCapitalize: "none",
       autoCorrect: "off",
       spellCheck: false,
@@ -208,11 +175,7 @@ export default function LoginPage() {
   const userIdField = useUppercaseField("");
   const companyId = companyField.value;
   const userField = userIdField.value;
-  /**
-   * The password lives in a ref, not in state: only the submit path needs it, so there is no reason
-   * to re-render this page on every keystroke for it (see `useUppercaseField`).
-   */
-  const passwordRef = useRef("");
+  const [password, setPassword] = useState("");
   const [rememberMe, setRememberMe] = useState(false);
   const [maintenanceList, setMaintenanceList] = useState([]);
   const [modal, setModal] = useState({ open: false, title: "Notice", message: "" });
@@ -228,62 +191,6 @@ export default function LoginPage() {
     const timer = setTimeout(() => setLogoSrc(LOGO_STATIC), LOGO_ANIMATION_MS);
     return () => clearTimeout(timer);
   }, [logoSrc]);
-
-  useEffect(() => {
-    /*
-     * Typing must not compete with the decorative animations: on an old phone (Sogou, low-end
-     * Android) the infinite glow/shimmer/blur effects are exactly what makes the IME's backspaces
-     * queue up — reported as "six presses before anything deletes". `body.is-typing` stops all of
-     * them while a field is focused (see styles/login.css), and the intro logo animation is cut
-     * short for the same reason: it is 54 animated frames nobody needs mid-typing.
-     */
-    const isField = (node) => node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement;
-    const onFocusIn = (event) => {
-      if (!isField(event.target)) return;
-      document.body.classList.add("is-typing");
-      setLogoSrc((current) => (current === LOGO_STATIC ? current : LOGO_STATIC));
-    };
-    const onFocusOut = () => {
-      /* Focus can move from one field to the next: only drop the class once nothing is focused. */
-      window.requestAnimationFrame(() => {
-        if (!isField(document.activeElement)) document.body.classList.remove("is-typing");
-      });
-    };
-    document.addEventListener("focusin", onFocusIn);
-    document.addEventListener("focusout", onFocusOut);
-    return () => {
-      document.removeEventListener("focusin", onFocusIn);
-      document.removeEventListener("focusout", onFocusOut);
-      document.body.classList.remove("is-typing");
-    };
-  }, []);
-
-  /*
-   * Device-side typing measurement. Users on old phones with Sogou report lag that cannot be
-   * reproduced off-device, so the only honest next step is to measure it where it happens: tapping
-   * the build marker shows this device's WebView version and the per-keystroke paint latency.
-   */
-  const [typingReport, setTypingReport] = useState(null);
-  /**
-   * Lite mode: see lib/liteMode.js. `?lite=1` / `?lite=0` flips it on the device in one tap, which is
-   * the fastest way to tell whether the page's own paint cost is what makes typing lag in the WebView.
-   */
-  const [lite, setLite] = useState(() => isLiteMode());
-  /**
-   * How eagerly a paused/ongoing IME composition is handed to the field (see
-   * lib/compositionCommit.js). Switchable from the diagnostics panel so the strength can be tried on
-   * the affected phone without a rebuild.
-   */
-  const [commitMode, setCommitMode] = useState(() => readCommitMode());
-  /** Props derived from the commit mode, spread onto the fields that cannot take Chinese text. */
-  const commitFieldProps = useMemo(() => commitProps(commitMode), [commitMode]);
-  useEffect(() => {
-    startTypingProbe();
-  }, []);
-  useEffect(() => {
-    applyLiteMode(lite);
-    if (lite) setLogoSrc((current) => (current === LOGO_STATIC ? current : LOGO_STATIC));
-  }, [lite]);
 
   const verifyTimeoutRef = useRef(null);
   const langThumbRef = useRef(null);
@@ -577,17 +484,13 @@ export default function LoginPage() {
     try {
       const fd = new FormData();
       fd.append("action", "login");
-      /* Read the fields' current text, not React state: the state only catches up on blur, and the
-         last field the user typed in is never blurred before they tap Sign in. */
-      const companyValue = companyField.valueRef.current;
-      const userValue = userIdField.valueRef.current;
-      fd.append("company_id", companyValue.toUpperCase().trim());
-      fd.append("password", passwordRef.current);
+      fd.append("company_id", companyId.toUpperCase().trim());
+      fd.append("password", password);
       fd.append("login_role", role);
       if (role === "member") {
-        fd.append("account_id", userValue.toUpperCase().trim());
+        fd.append("account_id", userField.toUpperCase().trim());
       } else {
-        fd.append("login_id", userValue.toUpperCase().trim());
+        fd.append("login_id", userField.toUpperCase().trim());
       }
       // member 也要传：后端已为 member / owner 实现 device_token 记住我
       // （过去只对 user 生效，而前端连字段都不发，member 根本没有记住我）
@@ -619,7 +522,7 @@ export default function LoginPage() {
         sessionStorage.removeItem(LOGIN_ASSET_RETRY_KEY);
         // 记住公司 ID：iOS 钥匙串只有 username + password 两个槽位，
         // 这个第三字段系统不保存，不本地记住的话每次都要手输。
-        writeLastCompanyId(companyValue);
+        writeLastCompanyId(companyId);
         const redirect = String(data.redirect || "").trim();
         if (/owner[-_]secondary[-_]password/i.test(redirect) || redirect === "/owner-secondary-password") {
           navigate("/owner-secondary-password", { replace: true });
@@ -662,21 +565,6 @@ export default function LoginPage() {
   };
 
   const maintenanceVisible = maintenanceList.length > 0;
-  /*
-   * Built once per maintenance list, not on every render: this used to re-parse the rich text of
-   * every item (twice, it is a marquee) on each keystroke the user typed.
-   */
-  const maintenanceItems = useMemo(
-    () =>
-      [...maintenanceList, ...maintenanceList].map((item, index) => (
-        <div className="sc-login-maintenance-item" key={`${item.id}-${index}`}>
-          <span className="sc-login-maintenance-dot" />
-          <span className="sc-login-maintenance-label">{item.prefix || i18n.maintenanceLabel}</span>
-          <span>{extractPlainTextFromRichText(item.content)}</span>
-        </div>
-      )),
-    [maintenanceList, i18n.maintenanceLabel],
-  );
 
   return (
     <>
@@ -693,7 +581,13 @@ export default function LoginPage() {
           {maintenanceVisible && (
             <div className="sc-login-maintenance-wrapper">
               <div className="sc-login-maintenance-track">
-                {maintenanceItems}
+                {[...maintenanceList, ...maintenanceList].map((item, index) => (
+                  <div className="sc-login-maintenance-item" key={`${item.id}-${index}`}>
+                    <span className="sc-login-maintenance-dot" />
+                    <span className="sc-login-maintenance-label">{item.prefix || i18n.maintenanceLabel}</span>
+                    <span>{extractPlainTextFromRichText(item.content)}</span>
+                  </div>
+                ))}
               </div>
             </div>
           )}
@@ -722,11 +616,11 @@ export default function LoginPage() {
               <form className="sc-login-form" onSubmit={onSubmit}>
                 <div className="sc-login-input-row">
                   <i className="fas fa-building sc-login-input-icon" />
-                  {/* 字段属性由 useUppercaseField 统一给（autoCapitalize=none / autoCorrect=off），
-                      并且交给 KeyboardOwnedInput：公司代码与用户名都不该被安卓键盘自动大写、
-                      也不该被 React 在重渲染时回写（那会丢掉刚打的字）。 */}
-                  <KeyboardOwnedInput
+                  {/* 字段属性由 useLoginField 统一给（autoCapitalize=none / autoCorrect=off）：
+                      公司代码与用户名都不该被安卓键盘自动大写、自动更正。 */}
+                  <input
                     id="company-id"
+                    type="text"
                     className="sc-login-input"
                     placeholder={i18n.companyPlaceholder}
                     required
@@ -734,15 +628,15 @@ export default function LoginPage() {
                     inputMode="text"
                     enterKeyHint="next"
                     {...companyField.fieldProps}
-                    {...commitFieldProps}
                   />
                 </div>
 
                 <div className="sc-login-input-row">
                   <i className="fas fa-user sc-login-input-icon" />
-                  {/* 同上（属性来自 useUppercaseField + KeyboardOwnedInput）*/}
-                  <KeyboardOwnedInput
+                  {/* 同上（属性同来自 useLoginField）*/}
+                  <input
                     id="user-id"
+                    type="text"
                     className="sc-login-input"
                     placeholder={userPlaceholder}
                     required
@@ -750,7 +644,6 @@ export default function LoginPage() {
                     inputMode="text"
                     enterKeyHint="next"
                     {...userIdField.fieldProps}
-                    {...commitFieldProps}
                   />
                 </div>
 
@@ -763,13 +656,8 @@ export default function LoginPage() {
                     required
                     autoComplete="current-password"
                     enterKeyHint="go"
-                    /* masked field, never Chinese text: same composition hand-over as the id fields */
-                    {...commitFieldProps}
-                    /* no `value` on purpose: typing must not re-render this page (see
-                       useUppercaseField); the submit path reads passwordRef */
-                    onChange={(e) => {
-                      passwordRef.current = e.target.value;
-                    }}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
                     showLabel={i18n.showPassword}
                     hideLabel={i18n.hidePassword}
                     onFocus={(e) => {
@@ -831,51 +719,6 @@ export default function LoginPage() {
               </form>
             </div>
           </div>
-          {/* 构建标记：报障时让用户念这一行，就能判断他跑的是哪份 bundle
-              （手机版是远程 SPA，不重载就一直是旧的；这样能直接排除“旧代码”这一层）。
-              点一下 → 显示本机的 WebView 版本与实测按键延迟（见 lib/typingProbe.js）。 */}
-          <button
-            type="button"
-            className="sc-login-build"
-            onClick={() => {
-              const report = readTypingReport();
-              setTypingReport(report);
-              if (noteTypingReport(report)) setLite(true);
-            }}
-          >
-            build {BUILD_ID}
-          </button>
-          {typingReport ? (
-            <div className="sc-login-diag-wrap">
-              <pre className="sc-login-diag" onClick={() => setTypingReport(null)}>
-                {formatTypingReport(typingReport)}
-              </pre>
-              {/* One tap on the real device: lite visuals on/off. */}
-              <button
-                type="button"
-                className="sc-login-diag-link"
-                onClick={() => setLite(setLiteMode(!lite))}
-              >
-                {lite ? "极简模式：开 · lite mode: on" : "极简模式：关 · lite mode: off"}
-              </button>
-              {/* One tap on the real device: how eagerly a held composition is handed to the field. */}
-              <button
-                type="button"
-                className="sc-login-diag-link"
-                onClick={() => setCommitMode(writeCommitMode(nextCommitMode(commitMode)))}
-              >
-                提交模式 commit: {commitMode}
-              </button>
-              {/* Opens in the same WebView as the app itself — that is the point: the test page has to
-                  run in the APK's engine, not in Chrome, to say anything about the APK. */}
-              <a className="sc-login-diag-link" href="input-test.html">
-                输入测试页 · input test
-              </a>
-              <a className="sc-login-diag-link" href="input-attrs.html">
-                输入属性对照 · attribute matrix
-              </a>
-            </div>
-          ) : null}
         </div>
       </div>
 

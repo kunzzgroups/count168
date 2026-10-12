@@ -31,7 +31,6 @@ import {
   tempGroupCode,
 } from "../../lib/domainHelpers.js";
 import { sanitizeEmailInput, validateEmail } from "../../lib/emailValidation.js";
-import KeyboardOwnedInput from "../../components/KeyboardOwnedInput.jsx";
 import { fetchJson } from "../../lib/fetchJson.js";
 import { getDomainText } from "../../translateFile/domainTranslate.js";
 import { buildApiUrl } from "../../utils/apiUrl.js";
@@ -1462,19 +1461,10 @@ export function DomainFormSheet({ open, onClose, domain, editingDomain, setConfi
             />
           </Field>
           <Field label={t("email")}>
-            {/*
-             * Keyboard-owned field: the value is normalised once the user leaves the field, not on
-             * every keystroke. Rewriting the text mid-typing (lowercase, strip spaces/CJK) breaks
-             * IME composition and moves the caret on Android — the same class of bug that ate
-             * characters on the login page. Validation and normalisation for submit are unchanged:
-             * `validateEmail(email)` + `emailCheck.normalized` still run on submit.
-             */}
-            <KeyboardOwnedInput
+            <input
               className="m-tx-form-input m-tx-form-input--muted"
               value={email}
-              initialValue={email}
-              onValueChange={setEmail}
-              onBlur={() => setEmail((current) => sanitizeEmailInput(current))}
+              onChange={(e) => setEmail(sanitizeEmailInput(e.target.value))}
               inputMode="email"
               autoComplete="email"
             />

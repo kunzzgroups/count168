@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import MobileShell from "../../components/layout/MobileShell.jsx";
 import MobileSubpageHeader from "../../components/layout/MobileSubpageHeader.jsx";
-import KeyboardOwnedInput from "../../components/KeyboardOwnedInput.jsx";
 import { useIncrementalList } from "../../hooks/useIncrementalList.js";
 import { useMobileAutoRenew } from "../../hooks/useMobileAutoRenew.js";
 import {
@@ -132,9 +131,9 @@ export default function AutoRenewPage() {
       />
       <label className="m-account-search">
         <i className="fas fa-magnifying-glass" aria-hidden="true" />
-        <KeyboardOwnedInput
+        <input
           value={api.search}
-          onValueChange={api.setSearch}
+          onChange={(e) => api.setSearch(e.target.value)}
           placeholder={t("searchPlaceholder")}
         />
       </label>

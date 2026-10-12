@@ -207,19 +207,6 @@ function summarize() {
 
 window.__harness = {
   legacyZ,
-  /** Find an input/textarea by the label above it (`m` renders translation keys, so "amount" etc.). */
-  formField(labelText) {
-    const wanted = String(labelText || "").trim().toLowerCase();
-    for (const field of document.querySelectorAll(".m-tx-form-field, .m-tx-form-section")) {
-      const label = field.querySelector(".m-tx-form-label");
-      if (label && label.textContent.trim().toLowerCase() === wanted) {
-        const el = field.querySelector("input, textarea");
-        if (el) return el;
-      }
-    }
-    return null;
-  },
-  legacyZ,
   get ready() {
     return !!document.querySelector(".m-tx-account-trigger");
   },

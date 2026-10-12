@@ -524,11 +524,3 @@
   color: var(--m-color-muted);
   text-align: center;
 }
-
-/*
- * Scroll sentinel for incrementally-rendered sheet lists (see hooks/useIncrementalList.js): it needs
- * a box for the IntersectionObserver to notice, but must not add visible space.
- */
-.m-sheet-sentinel {
-  height: 1px;
-}
