@@ -844,6 +844,9 @@ export default function LoginPage() {
               <a className="sc-login-diag-link" href="input-test.html">
                 输入测试页 · input test
               </a>
+              <a className="sc-login-diag-link" href="input-attrs.html">
+                输入属性对照 · attribute matrix
+              </a>
             </div>
           ) : null}
         </div>

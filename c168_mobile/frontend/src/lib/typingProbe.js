@@ -24,6 +24,8 @@ const MAX_SESSIONS = 5;
 let installed = false;
 const sessions = [];
 let current = null;
+/** Last known value length per field, to tell a real delete from an IME-internal one. */
+const lastLengths = new WeakMap();
 
 function isField(node) {
   return node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement;
@@ -51,6 +53,27 @@ export function startTypingProbe() {
       insertInputs: 0,
       deleteInputs: 0,
       beforeInputs: 0,
+      /*
+       * When the events *do* arrive, the next question is what they did: if the IME keeps the text in
+       * its own composition buffer, the delete events arrive while the field's value does not shrink.
+       * `valueShrinks` counts deletes that actually shortened the field; `composingDeletes` counts
+       * deletes that arrived mid-composition.
+       */
+      valueShrinks: 0,
+      composingDeletes: 0,
+      /*
+       * And when they arrive: a "press six times, then it deletes" experience where the page receives
+       * all six at once means the IME/WebView batched them. `firstInputDelayMs` is keydown -> first
+       * input event; `maxInputGapMs` the largest quiet period between two input events; `bursts`
+       * counts catch-up groups (an event arriving right after a long gap).
+       */
+      firstKeydownAt: 0,
+      firstInputAt: 0,
+      lastInputAt: 0,
+      /** Gap between the two input events before the last one (to detect catch-up pairs). */
+      prevInputGapMs: 0,
+      maxInputGapMs: 0,
+      bursts: 0,
     };
   };
   const finish = () => {
@@ -85,9 +108,39 @@ export function startTypingProbe() {
     (event) => {
       if (!current) return;
       current.keystrokes += 1;
+
+      const now = performance.now();
+      if (!current.firstInputAt) current.firstInputAt = now;
+      if (current.lastInputAt) {
+        const gap = now - current.lastInputAt;
+        if (gap > current.maxInputGapMs) current.maxInputGapMs = gap;
+        /* A catch-up pair: two events arriving almost together right after a long silence. That is
+           the signature of a keyboard holding edits and then flushing them in one go. */
+        if (current.prevInputGapMs > 500 && gap < 60) current.bursts += 1;
+        current.prevInputGapMs = gap;
+      }
+      current.lastInputAt = now;
+
       const inputType = String(event.inputType || "");
-      if (inputType.indexOf("delete") === 0) current.deleteInputs += 1;
+      const target = event.target;
+      const isDelete = inputType.indexOf("delete") === 0;
+      if (isDelete) current.deleteInputs += 1;
       else current.insertInputs += 1;
+      if (event.isComposing) current.composingDeletes += isDelete ? 1 : 0;
+
+      /* Did the delete actually shorten the field? (An IME can fire delete events while editing its
+         own composition, in which case the text the user sees does not change.) */
+      try {
+        if (target && typeof target.value === "string") {
+          const before = lastLengths.get(target);
+          const after = target.value.length;
+          if (isDelete && before !== undefined && after < before) current.valueShrinks += 1;
+          lastLengths.set(target, after);
+        }
+      } catch {
+        /* ignore */
+      }
+
       const startedAt = performance.now();
       requestAnimationFrame(() => {
         if (!current) return;
@@ -107,6 +160,7 @@ export function startTypingProbe() {
     "keydown",
     (event) => {
       if (!current) return;
+      if (!current.firstKeydownAt) current.firstKeydownAt = performance.now();
       if (event.key === "Backspace" || event.keyCode === 8) current.backspaces += 1;
     },
     true,
@@ -188,6 +242,16 @@ export function readTypingReport() {
           insertInputs: session.insertInputs,
           deleteInputs: session.deleteInputs,
           beforeInputs: session.beforeInputs,
+          valueShrinks: session.valueShrinks,
+          composingDeletes: session.composingDeletes,
+          /* Only meaningful when a key press preceded the first event: the harness (and some IMEs)
+             can deliver inserts without any keydown at all. */
+          firstInputDelayMs:
+            session.firstKeydownAt && session.firstInputAt > session.firstKeydownAt
+              ? Math.round(session.firstInputAt - session.firstKeydownAt)
+              : null,
+          maxInputGapMs: Math.round(session.maxInputGapMs),
+          bursts: session.bursts,
           paintLatency: stats(session.latencies),
           longTaskMs: session.longTaskMs,
         }
@@ -224,6 +288,30 @@ export function formatTypingReport(report) {
       );
     } else {
       lines.push(`backspace presses: ${s.backspaces} (all reached the page)`);
+    }
+    /* Did those deletes do anything visible? */
+    lines.push(
+      `deletes that shortened the field: ${s.valueShrinks} of ${s.deleteInputs}` +
+        (s.composingDeletes ? ` · during IME composition: ${s.composingDeletes}` : ""),
+    );
+    if (s.deleteInputs > 0 && s.valueShrinks < s.deleteInputs) {
+      lines.push(
+        "   => the keyboard kept those characters in its own composition buffer;",
+        "      the field text did not change (not something the page can undo)",
+      );
+    }
+    /* And when did they arrive? */
+    if (s.firstInputDelayMs !== null && (s.firstInputDelayMs > 700 || s.bursts > 0)) {
+      lines.push(
+        `!! events arrived late/batched: first input after ${s.firstInputDelayMs}ms · ` +
+          `longest quiet gap ${s.maxInputGapMs}ms · catch-up groups ${s.bursts}`,
+        "   => the keyboard held them and delivered them in bursts",
+      );
+    } else {
+      lines.push(
+        `event timing: first input after ${s.firstInputDelayMs === null ? "?" : s.firstInputDelayMs}ms · ` +
+          `longest gap ${s.maxInputGapMs}ms`,
+      );
     }
     lines.push(
       s.paintLatency

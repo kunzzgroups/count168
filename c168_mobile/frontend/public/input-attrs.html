@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="robots" content="noindex" />
+    <title>输入属性对照 / Input attribute matrix</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body {
+        margin: 0;
+        padding: 14px 12px 40px;
+        background: #f4f7fc;
+        color: #0f172a;
+        font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        -webkit-text-size-adjust: 100%;
+      }
+      h1 { margin: 4px 0 2px; font-size: 18px; }
+      p.lead { margin: 0 0 12px; font-size: 13px; color: #475569; }
+      ol.howto { margin: 0 0 14px; padding-left: 20px; font-size: 13px; color: #334155; }
+      ol.howto li { margin-bottom: 3px; }
+      .row {
+        background: #fff;
+        border: 1px solid #dbe4f0;
+        border-radius: 10px;
+        padding: 10px;
+        margin-bottom: 10px;
+      }
+      .row h2 { margin: 0 0 2px; font-size: 14px; }
+      .row .attrs { margin: 0 0 8px; font-size: 11px; color: #64748b; word-break: break-all; }
+      input.f {
+        width: 100%;
+        box-sizing: border-box;
+        height: 42px;
+        padding: 0 10px;
+        border: 1px solid #c7d3e3;
+        border-radius: 9px;
+        font: 16px/1.4 inherit;
+        background: #fbfdff;
+        color: inherit;
+        -webkit-text-security: none; /* keep password-type fields readable for this test */
+      }
+      input.f:focus { outline: 2px solid #2563eb33; border-color: #2563eb; }
+      .stats {
+        margin: 8px 0 0;
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 1px 8px;
+        font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+      .stats dt { color: #64748b; }
+      .stats dd { margin: 0; font-weight: 600; }
+      dd.bad { color: #b91c1c; }
+      dd.good { color: #15803d; }
+      .verdict { margin: 6px 0 0; font-size: 12px; font-weight: 700; }
+      .verdict.ok { color: #15803d; }
+      .verdict.bad { color: #b91c1c; }
+      .verdict.unknown { color: #64748b; }
+      footer { margin-top: 14px; font-size: 12px; color: #64748b; }
+    </style>
+  </head>
+  <body>
+    <h1>输入属性对照 / Input attribute matrix</h1>
+    <p class="lead">
+      目的：找出让输入法<strong>不把字留在自己的组合缓冲区</strong>的那组 input 属性 —— 用户症状是
+      “连按删除 6 次才开始删”，而这几次删除很可能被输入法内部消化了。
+      <br />
+      Goal: find the input attributes that stop the keyboard from holding the text in its own
+      composition buffer.
+    </p>
+    <ol class="howto">
+      <li>在<strong>每个</strong>框里用同一个输入法输入 <code>abcde</code>（英文键盘）。</li>
+      <li>连按<strong>删除 6 次</strong>，看下面的数字变化。</li>
+      <li>找<strong>「删除立刻生效」且「真正缩短输入框 = 删除事件数」</strong>的那个框，把编号（A–H）告诉客服。</li>
+    </ol>
+
+    <div id="rows"></div>
+
+    <footer>
+      <div id="env"></div>
+      <div style="margin-top: 6px">
+        读法：<strong>「真正缩短输入框」少于「删除事件」</strong>＝那几次删除只改动了输入法的组合缓冲，输入框内容没变；
+        <strong>「首个事件延迟」很大或「补发批次」&gt; 0</strong>＝事件被攒起来一次性送达。
+      </div>
+    </footer>
+
+    <script>
+      /* Dependency-free on purpose: this has to run on the oldest WebView we support. */
+      var VARIANTS = [
+        {
+          id: "A",
+          title: "A · 现在登录页用的（type=text + autocomplete=username）",
+          attrs: { type: "text", autocomplete: "username", inputmode: "text", autocorrect: "off", autocapitalize: "off", spellcheck: "false" },
+        },
+        {
+          id: "B",
+          title: "B · 现在搜索框用的（autocomplete=off，无 inputmode）",
+          attrs: { type: "text", autocomplete: "off", autocorrect: "off", autocapitalize: "off", spellcheck: "false" },
+        },
+        {
+          id: "C",
+          title: "C · type=search",
+          attrs: { type: "search", autocomplete: "off", autocorrect: "off", autocapitalize: "off", spellcheck: "false" },
+        },
+        {
+          id: "D",
+          title: "D · type=text + autocomplete=on（对照：让输入法自由发挥）",
+          attrs: { type: "text", autocomplete: "on", autocorrect: "on", autocapitalize: "sentences", spellcheck: "true" },
+        },
+        {
+          id: "E",
+          title: "E · type=email",
+          attrs: { type: "email", autocomplete: "off", autocorrect: "off", autocapitalize: "off", spellcheck: "false" },
+        },
+        {
+          id: "F",
+          title: "F · type=password（安全输入模式；本页已强制显示文字）",
+          attrs: { type: "password", autocomplete: "off", autocorrect: "off", autocapitalize: "off", spellcheck: "false" },
+        },
+        {
+          id: "G",
+          title: "G · type=text + inputmode=search",
+          attrs: { type: "text", inputmode: "search", autocomplete: "off", autocorrect: "off", autocapitalize: "off", spellcheck: "false" },
+        },
+        {
+          id: "H",
+          title: "H · type=text + enterKeyHint=search + autocomplete=off",
+          attrs: { type: "text", enterkeyhint: "search", autocomplete: "off", autocorrect: "off", autocapitalize: "off", spellcheck: "false" },
+        },
+      ];
+
+      function blank() {
+        return { keydown: 0, backspace: 0, del: 0, ins: 0, shrink: 0, composing: 0, firstAt: 0, firstKeyAt: 0, lastAt: 0, maxGap: 0, bursts: 0 };
+      }
+
+      var state = {};
+      var lastLen = new WeakMap();
+
+      function el(tag, cls, text) {
+        var n = document.createElement(tag);
+        if (cls) n.className = cls;
+        if (text !== undefined) n.textContent = text;
+        return n;
+      }
+
+      function render(id) {
+        var s = state[id];
+        var box = document.getElementById("stats-" + id);
+        var verdict = document.getElementById("verdict-" + id);
+        box.innerHTML = "";
+        function row(k, v, cls) {
+          box.appendChild(el("dt", null, k));
+          box.appendChild(el("dd", cls || null, v));
+        }
+        var firstDelay = s.firstKeyAt && s.firstAt ? Math.round(s.firstAt - s.firstKeyAt) : null;
+        row("你按了几次删除", s.backspace);
+        row("删除事件到达页面", s.del);
+        row("真正缩短输入框", s.shrink, s.del > 0 && s.shrink === s.del ? "good" : s.del > 0 ? "bad" : null);
+        row("组合中的删除", s.composing, s.composing > 0 ? "bad" : "good");
+        row("首个事件延迟", firstDelay === null ? "—" : firstDelay + " ms", firstDelay > 700 ? "bad" : null);
+        row("最长静默间隔", s.maxGap + " ms", s.maxGap > 800 ? "bad" : null);
+        row("补发批次", s.bursts, s.bursts > 0 ? "bad" : "good");
+
+        if (!s.del) {
+          verdict.className = "verdict unknown";
+          verdict.textContent = "还没测：先输入 5 个字母再连按删除";
+        } else if (s.shrink === s.del && !s.bursts) {
+          verdict.className = "verdict ok";
+          verdict.textContent = "✓ 这组属性：删除立刻生效";
+        } else {
+          verdict.className = "verdict bad";
+          verdict.textContent = "✗ 这组属性：删除被输入法吃掉或成批延迟";
+        }
+      }
+
+      VARIANTS.forEach(function (v) {
+        state[v.id] = blank();
+        var row = el("div", "row");
+        row.appendChild(el("h2", null, v.title));
+        row.appendChild(el("p", "attrs", Object.keys(v.attrs).map(function (k) { return k + "=" + v.attrs[k]; }).join("  ")));
+
+        var input = document.createElement("input");
+        input.className = "f";
+        input.id = "f-" + v.id;
+        Object.keys(v.attrs).forEach(function (k) {
+          try { input.setAttribute(k, v.attrs[k]); } catch (e) {}
+        });
+        row.appendChild(input);
+
+        var box = el("dl", "stats");
+        box.id = "stats-" + v.id;
+        row.appendChild(box);
+        var verdict = el("p", "verdict unknown", "还没测");
+        verdict.id = "verdict-" + v.id;
+        row.appendChild(verdict);
+        document.getElementById("rows").appendChild(row);
+
+        var s = state[v.id];
+        input.addEventListener("keydown", function (e) {
+          if (!s.firstKeyAt) s.firstKeyAt = performance.now();
+          if (e.key === "Backspace" || e.keyCode === 8) s.backspace += 1;
+          render(v.id);
+        });
+        input.addEventListener("input", function (e) {
+          var now = performance.now();
+          if (!s.firstAt) s.firstAt = now;
+          if (s.lastAt) {
+            var gap = now - s.lastAt;
+            if (gap > s.maxGap) s.maxGap = gap;
+            if (gap > 500) s.bursts += 1;
+          }
+          s.lastAt = now;
+
+          var type = String(e.inputType || "");
+          var isDel = type.indexOf("delete") === 0;
+          if (isDel) {
+            s.del += 1;
+            if (e.isComposing) s.composing += 1;
+          } else {
+            s.ins += 1;
+          }
+          var before = lastLen.get(input);
+          if (isDel && before !== undefined && input.value.length < before) s.shrink += 1;
+          lastLen.set(input, input.value.length);
+          render(v.id);
+        });
+        render(v.id);
+      });
+
+      (function () {
+        var ua = navigator.userAgent || "";
+        var chrome = ua.match(/Chrome\/([\d.]+)/);
+        var android = ua.match(/Android\s([\d.]+)/);
+        var inApp = /EazyCount/.test(ua) || !!window.Capacitor;
+        document.getElementById("env").textContent =
+          "WebView " + (chrome ? chrome[1] : "?") + (android ? " · Android " + android : "") +
+          " · 运行环境: " + (inApp ? "App 内 (WebView)" : "浏览器") +
+          " · cores " + (navigator.hardwareConcurrency || "?");
+      })();
+    </script>
+  </body>
+</html>
