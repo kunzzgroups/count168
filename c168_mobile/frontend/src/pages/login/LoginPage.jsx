@@ -199,6 +199,35 @@ export default function LoginPage() {
     return () => clearTimeout(timer);
   }, [logoSrc]);
 
+  useEffect(() => {
+    /*
+     * Typing must not compete with the decorative animations: on an old phone (Sogou, low-end
+     * Android) the infinite glow/shimmer/blur effects are exactly what makes the IME's backspaces
+     * queue up — reported as "six presses before anything deletes". `body.is-typing` stops all of
+     * them while a field is focused (see styles/login.css), and the intro logo animation is cut
+     * short for the same reason: it is 54 animated frames nobody needs mid-typing.
+     */
+    const isField = (node) => node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement;
+    const onFocusIn = (event) => {
+      if (!isField(event.target)) return;
+      document.body.classList.add("is-typing");
+      setLogoSrc((current) => (current === LOGO_STATIC ? current : LOGO_STATIC));
+    };
+    const onFocusOut = () => {
+      /* Focus can move from one field to the next: only drop the class once nothing is focused. */
+      window.requestAnimationFrame(() => {
+        if (!isField(document.activeElement)) document.body.classList.remove("is-typing");
+      });
+    };
+    document.addEventListener("focusin", onFocusIn);
+    document.addEventListener("focusout", onFocusOut);
+    return () => {
+      document.removeEventListener("focusin", onFocusIn);
+      document.removeEventListener("focusout", onFocusOut);
+      document.body.classList.remove("is-typing");
+    };
+  }, []);
+
   const verifyTimeoutRef = useRef(null);
   const langThumbRef = useRef(null);
   const prevLangRef = useRef(lang);

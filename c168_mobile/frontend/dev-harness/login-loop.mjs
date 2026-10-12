@@ -28,6 +28,10 @@ const argv = Object.fromEntries(
 
 const URL_UNDER_TEST = String(argv.url || "http://localhost:5174/login");
 const THROTTLE = Number(argv.throttle || 6);
+/** A single backspace may take longer on slower hardware — scale with the emulated CPU. */
+const DELETE_LATENCY_BUDGET_MS = Number(argv.latencyBudget || 120 + 6 * THROTTLE);
+/** Kill every animation/transition/filter before the delete phase — quantifies their cost. */
+const NOANIM = argv.noanim === true || argv.noanim === "1";
 const FRAME_GAP_BUDGET_MS = Number(argv.budget || 120 + 30 * THROTTLE);
 const CHROME =
   process.env.CHROME_PATH ||
@@ -299,9 +303,26 @@ async function main() {
     }
     const typeMetrics = await readMetrics();
 
-    /* then 8 backspaces */
+    /* then 8 backspaces, measuring each press -> field-value change (what a user feels as "lag") */
     await evalInPage("window.__perf.resetAt = performance.now(); true");
+    if (NOANIM) {
+      await evalInPage(`(() => {
+        const s = document.createElement('style');
+        s.textContent = '*,*::before,*::after{animation:none !important;transition:none !important;filter:none !important;backdrop-filter:none !important;-webkit-backdrop-filter:none !important}';
+        document.head.appendChild(s);
+        return true;
+      })()`);
+      await sleep(300);
+    }
+
+    const readValue = () =>
+      evalInPage("(() => { const el = document.querySelector('#user-id'); return el ? el.value : null; })()");
+
+    const latencies = [];
+    let pressesNeeded = null;
+    let current = await readValue();
     for (let i = 0; i < DELETES; i += 1) {
+      const t0 = await evalInPage("performance.now()");
       for (const type of ["rawKeyDown", "keyUp"]) {
         await send("Input.dispatchKeyEvent", {
           type,
@@ -311,27 +332,54 @@ async function main() {
           nativeVirtualKeyCode: 8,
         });
       }
+      let applied = null;
+      const deadline = Date.now() + 3000;
+      while (Date.now() < deadline) {
+        const value = await readValue();
+        if (value !== current) {
+          applied = { value, at: await evalInPage("performance.now()") };
+          break;
+        }
+        await sleep(20);
+      }
+      if (applied) {
+        latencies.push(Math.round(applied.at - t0));
+        if (pressesNeeded === null) pressesNeeded = i + 1;
+        current = applied.value;
+      } else {
+        latencies.push(null);
+      }
       await sleep(110);
     }
-    await sleep(700);
+    await sleep(500);
     const deleteMetrics = await readMetrics();
-    const valueAfterDeletes = await evalInPage(
-      "(() => { const el = document.querySelector('#user-id'); return el ? el.value : null; })()",
-    );
+    const valueAfterDeletes = await readValue();
+
+    const applied = latencies.filter((l) => l !== null);
+    const maxDeleteLatency = applied.length ? Math.max(...applied) : null;
+    const slowDeletes = applied.filter((l) => l > DELETE_LATENCY_BUDGET_MS).length;
 
     const expectedAfterDeletes = TYPED.slice(0, TYPED.length - DELETES);
     record(
-      `login: delete stays responsive on a throttled CPU (x${THROTTLE})`,
-      deleteMetrics.maxFrameGap < FRAME_GAP_BUDGET_MS && valueAfterDeletes === expectedAfterDeletes,
+      `login: delete stays responsive on a throttled CPU (x${THROTTLE}${NOANIM ? ", animations off" : ""})`,
+      deleteMetrics.maxFrameGap < FRAME_GAP_BUDGET_MS &&
+        valueAfterDeletes === expectedAfterDeletes &&
+        maxDeleteLatency !== null &&
+        maxDeleteLatency < DELETE_LATENCY_BUDGET_MS,
       {
         throttle: THROTTLE,
+        noAnim: NOANIM,
         budgetMs: FRAME_GAP_BUDGET_MS,
+        latencyBudgetMs: DELETE_LATENCY_BUDGET_MS,
         expectedAfterDeletes,
         typeMaxFrameGap: Math.round(typeMetrics.maxFrameGap),
         deleteMaxFrameGap: Math.round(deleteMetrics.maxFrameGap),
         deleteLongTasks: deleteMetrics.longTaskCount,
         deleteTotalLongTask: deleteMetrics.totalLongTask,
-        deleteMaxLongTask: deleteMetrics.maxLongTask,
+        maxDeleteLatency,
+        slowDeletes,
+        latencies,
+        pressesNeeded,
         valueAfterDeletes,
       },
     );

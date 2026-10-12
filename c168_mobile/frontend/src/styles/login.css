@@ -166,7 +166,8 @@ button.sc-login-lang-seg:hover {
 button.sc-login-lang-seg.active {
   color: #ffffff;
   text-shadow: 0 1px 4px rgba(30, 64, 175, 0.28);
-  animation: sc-login-lang-text-breathe 1.8s ease-in-out infinite;
+  /* no infinite `text-shadow` animation: repainting the label every frame is what helped make an
+     old phone's backspaces queue up. */
 }
 
 .sc-login-lang-thumb,
@@ -202,16 +203,16 @@ button.sc-login-lang-seg.active {
   height: 176%;
   pointer-events: none;
   transform: rotate(20deg);
+  /* `mix-blend-mode: screen` removed: it forces a blend of the layer on every frame of the sweep. */
   background: linear-gradient(
     90deg,
     rgba(255, 255, 255, 0) 0%,
     rgba(255, 255, 255, 0.62) 50%,
     rgba(255, 255, 255, 0) 100%
   );
-  mix-blend-mode: screen;
+  mix-blend-mode: normal;
   animation: sc-login-lang-shimmer 2.1s cubic-bezier(0.2, 0.8, 0.2, 1) infinite;
 }
-
 .sc-login-lang-switch:active .sc-login-lang-thumb,
 .sc-login-lang-ios:active .sc-login-lang-thumb,
 .sc-login-lang-ios:active .sc-login-lang-ios-thumb {
@@ -721,23 +722,17 @@ button.sc-login-lang-seg.active {
 @keyframes sc-login-lang-glow-breathe {
   0%,
   100% {
-    opacity: 0.62;
-    filter: blur(9px);
+    opacity: 0.55;
   }
   50% {
-    opacity: 0.98;
-    filter: blur(12px);
+    opacity: 0.95;
   }
 }
 
 @keyframes sc-login-lang-text-breathe {
-  0%,
-  100% {
-    text-shadow: 0 1px 4px rgba(30, 64, 175, 0.28);
-  }
-  50% {
-    text-shadow: 0 1px 10px rgba(147, 197, 253, 0.85);
-  }
+  /* Retired: it animated `text-shadow`, i.e. it repainted the label every frame. The active label
+     keeps the static shadow instead (see its rule). Kept as an empty keyframe-free comment so the
+     name is not silently reused. */
 }
 
 .sc-login-column {
@@ -917,4 +912,27 @@ body.bg .sc-login-input::placeholder {
   color: rgba(255, 255, 255, 0.42);
   user-select: text;
   -webkit-user-select: text;
+}
+
+/*
+ * While a field has focus the login page must not animate anything.
+ *
+ * Why: these are all infinite, decorative animations — a blur that re-rasterises every frame, a
+ * text-shadow repaint, a blend-mode sweep. On an old Android phone they keep the raster/compositor
+ * busy, and the user's keystrokes queue up behind them (reported with Sogou + an old phone:
+ * "six backspaces before anything deletes"). Focused input = no animation, so typing and deleting
+ * get the whole machine.
+ *
+ * The class is toggled by LoginPage on focusin/focusout.
+ */
+body.is-typing .sc-login-lang-ios::after,
+body.is-typing .sc-login-lang-switch::after,
+body.is-typing .sc-login-lang-ios-thumb::before,
+body.is-typing .sc-login-lang-thumb::before,
+body.is-typing .sc-login-lang-ios .sc-login-lang-seg.active,
+body.is-typing .sc-login-lang-option.active,
+body.is-typing button.sc-login-lang-seg.active,
+body.is-typing .sc-login-maintenance-track {
+  animation: none !important;
+  transition: none !important;
 }
