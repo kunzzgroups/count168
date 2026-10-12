@@ -184,7 +184,7 @@ async function main() {
       await waitFor(
         async () =>
           evalInPage(
-            "!!document.querySelector('.bio-lock, #app-content, #harness-loading, [data-testid=\"pin-setup\"]')",
+            "!!document.querySelector('.bio-lock, #app-content, #harness-loading, #offer-harness, [data-testid=\"pin-setup\"]')",
           ),
         { label: "harness mount", timeout: 25000 },
       );
@@ -504,6 +504,80 @@ async function main() {
       "11. iOS/网页：没设 PIN → 不锁，行为与改动前一致（passkey 那条路不受影响）",
       parsedNoPin.app === true && parsedNoPin.pad === false && parsedNoPin.lock === false,
       noPinState,
+    );
+    // ── 12. iOS 登录后的引导（走登录页那条路：**不传**任何 prop）────────
+    console.log("iOS post-login offer");
+    await goto(`${BASE}?web=1&nopin=1&offer=1&standalone=1`);
+    await waitFor(async () => evalInPage("window.__offerResult !== undefined"), {
+      label: "offer() resolved",
+    });
+    const offerOpened = await evalInPage("window.__offerResult");
+    const offerPanel = await waitFor(
+      async () =>
+        evalInPage(`(() => {
+          const el = document.querySelector('[data-testid="pin-setup"]');
+          if (!el) return false;
+          return el.innerText || false;
+        })()`),
+      { label: "PIN setup panel from the offer", timeout: 10000 },
+    ).catch(() => false);
+    record(
+      "12. iOS（独立 App）：登录后弹出「设置 PIN」引导（页面一个 prop 都没传也能弹）",
+      offerOpened === true && Boolean(offerPanel),
+      `offer()=${offerOpened} panel=${JSON.stringify(String(offerPanel).slice(0, 80))}`,
+    );
+    record(
+      "12b. 独立 App 的文案说的是 Face ID 用不了（不是“这台手机没有人脸”）",
+      typeof offerPanel === "string" && offerPanel.includes("Face ID") && !offerPanel.includes("no fingerprint or face"),
+      JSON.stringify(String(offerPanel).slice(0, 200)),
+    );
+    await shot("pin-offer-ios.png");
+
+    // ── 13. 输两遍 PIN → 真的存下来并跳转（验证 pendingOffer 的兜底回调）───
+    const typeOfferPin = async (pin) => {
+      for (const digit of pin) {
+        await tap(`pin-setup-key-${digit}`);
+        await sleep(50);
+      }
+      await sleep(150);
+    };
+    await typeOfferPin(SEED_PIN);
+    await typeOfferPin(SEED_PIN);
+    const offerSaved = await waitFor(
+      async () =>
+        evalInPage(`JSON.stringify({
+          pin: localStorage.getItem('ec_pin_unlock') ? 'saved' : 'missing',
+          done: window.__enrolDone || ''
+        })`),
+      { label: "PIN saved by the offer", timeout: 15000 },
+    ).catch(() => "(timeout)");
+    const parsedOffer = JSON.parse(offerSaved === "(timeout)" ? '{"pin":"timeout","done":""}' : offerSaved);
+    record(
+      "13. 输两遍后 PIN 真的落库并跳到目标页（登录页靠的就是这条兜底回调）",
+      parsedOffer.pin === "saved" && parsedOffer.done === "/dashboard",
+      offerSaved,
+    );
+
+    // ── 14. 「暂不开启」是持久的：不再反复问 ─────────────────────────
+    await goto(`${BASE}?web=1&nopin=1&offer=1&standalone=1`);
+    await waitFor(async () => evalInPage("window.__offerResult !== undefined"), {
+      label: "offer() resolved (skip path)",
+    });
+    await waitFor(async () => evalInPage("!!document.querySelector('[data-testid=\"pin-setup-cancel\"]')"), {
+      label: "PIN offer cancel button",
+    });
+    await tap("pin-setup-cancel");
+    await sleep(300);
+    const skipState = JSON.parse(
+      await evalInPage(`(async () => JSON.stringify({
+        optout: localStorage.getItem('ec_bio_prompt_optout'),
+        again: await window.__offerAgain()
+      }))()`),
+    );
+    record(
+      "14. 「暂不开启」→ 记住拒绝，再 offer 一次不再弹",
+      skipState.optout === "1" && skipState.again === false,
+      JSON.stringify(skipState),
     );
   } catch (error) {
     console.error(`\nharness error: ${error?.message || error}`);

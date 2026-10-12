@@ -24,7 +24,7 @@ disappears again"* bug is reproduced on the **real page** there — run the app 
 npm run dev -- --port 5174 --strictPort
 node dev-harness/login-loop.mjs                      # 5 checks, all 5 fail on the pre-fix code
 node dev-harness/search-sweep.mjs                    # wiring check for the other search boxes
-node dev-harness/pin-lock-loop.mjs                   # 15 checks: lock screen + PIN pad + PIN setup
+node dev-harness/pin-lock-loop.mjs                   # 21 checks: lock screen + PIN pad + PIN setup + iOS paths
 ```
 
 `search-sweep.mjs` walks `/account`, `/maintenance/payment`, `/report/*`, `/more/auto-renew`,
@@ -49,6 +49,9 @@ Manual testing in a browser (no backend needed — the list/token are mocked):
 | `…/dev-harness/pin-lock.html?bio=1` | a device that also has a fingerprint: biometric card with both fallbacks |
 | `…/dev-harness/pin-lock.html?setup=1` | the "set up PIN" modal on its own |
 | `…/dev-harness/pin-lock.html?pin=4821&len=4` | a 4-digit PIN (the default is 6) |
+| `…/dev-harness/pin-lock.html?web=1` | iOS / plain web: locks only when a PIN is set |
+| `…/dev-harness/pin-lock.html?web=1&nopin=1` | web with no PIN — must NOT lock |
+| `…/dev-harness/pin-lock.html?web=1&nopin=1&offer=1&standalone=1` | the iOS post-login "set up PIN" offer |
 
 Recipe: open the To Account field, type a few digits (the mock codes run `1001…`), keep the panel
 up, then click inside the date row's band (add `&mark=1` to see it). `legacyZ=1` → the OS date

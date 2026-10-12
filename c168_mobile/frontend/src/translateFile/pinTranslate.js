@@ -37,15 +37,21 @@ export const PIN_I18N = {
     setupTitle: "Set up PIN unlock",
     // 6 位在前：界面上的默认值就是 6 位（见 lib/pinStore.js 的 PIN_LENGTHS），
     // 文案顺序跟着默认走，否则用户会以为我们推荐 4 位。
+    // 这句是**平台中性**的默认文案（安卓有生物识别的那批人、iOS 普通浏览器都看它）。
     setupBody:
-      "Choose 6 digits (or 4 if you prefer). You will use this PIN to unlock EazyCount on this device — for example when a fingerprint is not recognised.",
+      "Choose 6 digits (or 4 if you prefer). From now on this PIN opens EazyCount on this device — you will not have to type your full password.",
     setupBodyNoBiometric:
       "This phone has no fingerprint or face set up for apps. A PIN still lets you open EazyCount without typing your full password.",
+    /** iOS 独立 App（加到主屏幕）：passkey 在那里用不了，Face ID 也就无从谈起 */
+    setupBodyNoPasskey:
+      "Face ID cannot be used inside a home-screen app on iPhone (passkeys do not work there). A PIN still opens EazyCount without typing your full password.",
     setupLength: "PIN length",
     len4: "4 digits",
     len6: "6 digits",
     /** 位数选择按钮的读屏文案（按钮本身只显示“6 位”） */
     lenAria: "Use a {len}-digit PIN",
+    /** 引导弹窗上“以后再说”——与生物识别引导共用同一个拒绝标记 */
+    later: "Not now",
     setupEnter: "Enter your new PIN",
     setupConfirm: "Enter it again to confirm",
     setupMismatch: "The two PINs do not match. Please start again.",
@@ -93,13 +99,16 @@ export const PIN_I18N = {
     // ── 设置 / 引导 ─────────────────────────────────────────
     setupTitle: "设置 PIN 解锁",
     setupBody:
-      "默认 6 位，也可以选 4 位。以后用这个 PIN 就能在本机解锁 EazyCount —— 比如指纹没认出来的时候。",
+      "默认 6 位，也可以选 4 位。以后打开 EazyCount 输这个 PIN 就能进入，不用再输完整密码。",
     setupBodyNoBiometric:
       "这台手机里没有可供 App 使用的指纹或人脸。设一个 PIN，同样不用每次输完整密码就能进入。",
+    setupBodyNoPasskey:
+      "iPhone 的独立 App（加到主屏幕）里用不了 Face ID —— 那里的 passkey 不支持。设一个 PIN，同样不用每次输完整密码就能进入。",
     setupLength: "PIN 位数",
     len4: "4 位",
     len6: "6 位",
     lenAria: "改用 {len} 位 PIN",
+    later: "暂不开启",
     setupEnter: "输入新的 PIN",
     setupConfirm: "再输入一次确认",
     setupMismatch: "两次输入不一致，请重新设置。",

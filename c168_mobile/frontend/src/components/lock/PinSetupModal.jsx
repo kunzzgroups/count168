@@ -135,7 +135,16 @@ export function usePinSetup({ lang } = {}) {
  */
 export function PinSetupPanel({
   lang,
-  noBiometric = false,
+  /**
+   * 说明文案的变体（决定第三行说“为什么让你设 PIN”）：
+   *   undefined      → setupBody（中性：以后不用输完整密码）
+   *   "noBiometric"  → 安卓这台手机没有指纹/人脸
+   *   "noPasskey"    → iOS 独立 App 里 passkey/Face ID 用不了
+   *
+   * 为何不继续用布尔 noBiometric：iOS 那一句话语义完全不同（Face ID 是有的，
+   * 只是独立 App 里用不了），拿 boole 凑就会写出“这台手机没有人脸”这种假话。
+   */
+  variant,
   title,
   busy = false,
   error = "",
@@ -169,12 +178,13 @@ export function PinSetupPanel({
     void onSubmit?.(pin, len);
   };
 
-  const hint =
-    round === "enter"
-      ? noBiometric
-        ? t.setupBodyNoBiometric
-        : t.setupBody
-      : t.setupConfirm;
+  const body =
+    variant === "noBiometric"
+      ? t.setupBodyNoBiometric
+      : variant === "noPasskey"
+        ? t.setupBodyNoPasskey
+        : t.setupBody;
+  const hint = round === "enter" ? body : t.setupConfirm;
 
   return (
     <div className="pin-setup" data-testid="pin-setup">

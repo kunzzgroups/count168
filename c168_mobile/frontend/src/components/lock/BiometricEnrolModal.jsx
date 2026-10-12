@@ -12,6 +12,7 @@ import {
 } from "../../lib/biometricStore.js";
 import { registerDeviceToken } from "../../lib/deviceTokenApi.js";
 import { clearPin, isPinSupported, pinEnabled, readPinSettings } from "../../lib/pinStore.js";
+import { hasPasskeyOnDevice, isStandaloneWebApp, webauthnSupported } from "../../lib/webauthn.js";
 import { LOGIN_I18N } from "../../translateFile/authTranslate.js";
 import { pinText } from "../../translateFile/pinTranslate.js";
 import { PinSetupPanel, usePinSetup } from "./PinSetupModal.jsx";
@@ -26,30 +27,35 @@ import { PinSetupPanel, usePinSetup } from "./PinSetupModal.jsx";
  * 走的是另一条路：LoginPage 把用户 `navigate` 到二级密码页，二级密码页成功后再
  * 直接 `navigate` 进 App —— 引导**从头到尾不会出现** ✗
  *
- * ── 两种引导（**按设备实情二选一**）────────────────────────────────
+ * ── 两种引导（**按平台与设备实情三选一**）────────────────────────────────
  *
- *   设备有生物识别 → 引导「开启生物识别」
- *   设备没有        → 引导「设置 PIN」（4/6 位）
+ *   安卓 + 有生物识别    → 引导「开启生物识别」
+ *   安卓 + 没生物识别    → 引导「设置 PIN」（4/6 位）
+ *   iOS / 网页（!isNative）→ 引导「设置 PIN」（4/6 位）
  *
- * 第二个分支是这次新加的：没有指纹 / 人脸的用户原来**既没有门禁也没有快捷入口**，
- * 每次冷启动都只能重输账号密码。引导必须覆盖他们，否则 PIN 功能等于藏起来了。
+ * 后两个分支的理由是同一个：没有指纹 / 人脸的（以及 iOS 独立 App 里 passkey
+ * 用不了的）用户原来**既没有门禁也没有快捷入口**，每次冷启动都只能重输账号密码。
+ * 引导必须覆盖他们，否则 PIN 功能等于藏起来了。
  *
  * ── 何时提 ────────────────────────────────────────────────────────
  *
- * 判据与原来一致，只有四个条件同时成立才提：
- *   1. 在原生壳里（网页端走 passkey，不弹这个）
- *   2. 用户没有拒绝过（读过「暂不开启」）
- *   3. 本机**没有凭据**（没凭据 = 生物识别开不了）
- *   4. 设备确实有可用的生物识别，**或者**这台设备能安全存 PIN
+ * 共同前置：
+ *   1. 用户没有拒绝过（读过「暂不开启」）
+ *   2. 本机**还没设过 PIN**
+ *   3. 这台设备能安全地存 PIN（WebCrypto + 本地存储）
  *
- * 注意第 3 条就是「有没有开启过」的判据，**不要**改成读模型里的 enabled：
+ * 安卓额外一条：本机**没有凭据**（= 生物识别没开）。
+ * 注意这条就是「有没有开启过」的判据，**不要**改成读模型里的 enabled：
  * 模型说 enabled 但凭据被作废时，用 enabled 判断会既不弹引导、也无法解锁。
+ *
+ * 网页额外一条：本机**没有 passkey** —— 已经有更快的一条路了，
+ * 再让用户额外记一个码是加负担，不是给方便。
  *
  * @param {(targetPath: string) => void} onDone 用哪个都行之后跳到哪
  */
 
 /**
- * 本轮引导的方式与「PIN 提交」回调。
+ * 本轮引导的方式、文案变体与「PIN 提交」回调。
  *
  * ⚠️ 为什么要模块级变量：登录页（LoginPage.jsx）目前**只传**
  * `open/busy/error/onEnable/onSkip`，而它的 `<BiometricEnrolModal>` 是常驻渲染、
@@ -59,17 +65,18 @@ import { PinSetupPanel, usePinSetup } from "./PinSetupModal.jsx";
  * 顺序上是安全的：`offer()` 先写这里、再 `setOpen(true)`，两者在同一次渲染里生效，
  * 所以弹窗真正渲染时读到的必然是本轮的值（同一个模块，同步赋值）。
  *
- * 显式传 `mode` / `onEnablePin` 优先（二级密码页就是这么用的）。
- * TODO：登录页那个并行改动落地后，给它补上
- * `mode={enrol.mode} onEnablePin={enrol.enablePin}`，这个对象就可以删掉。
+ * 显式传 `mode` / `variant` / `onEnablePin` 优先（二级密码页就是这么用的）。
+ * TODO：登录页那个并行改动落地后，给它补上这几个 prop，这个对象就可以删掉。
  */
-const pendingOffer = { mode: "biometric", submitPin: null };
+const pendingOffer = { mode: "biometric", variant: undefined, submitPin: null };
 
 export function useBiometricEnrol(onDone) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [mode, setMode] = useState("biometric"); // "biometric" | "pin"
+  /** 说明文案变体：undefined（中性）/ "noBiometric"（安卓没指纹人脸）/ "noPasskey"（iOS 独立 App） */
+  const [variant, setVariant] = useState();
   const target = useRef("/dashboard");
   const pinSetup = usePinSetup({ lang: readLoginLang() });
   /** 供 pendingOffer 在**调用时**取最新实现（避免闭包拿到旧的那一份） */
@@ -79,23 +86,51 @@ export function useBiometricEnrol(onDone) {
    * 尝试弹引导。返回 true 表示**已经接管跳转**，调用方不要再 navigate。
    *
    * 这样调用方可以保持一行：`if (await enrol.offer(path)) return; navigate(path);`
+   *
+   * ── 两端各提什么 ────────────────────────────────────────
+   *
+   *  安卓 APK ：有生物识别 → 引导生物识别；没有 → 引导设 PIN（同一批人原来啥都没有）
+   *  iOS / 网页：只引导设 PIN。原因：那边的启动锁**只看有没有 PIN**
+   *              （见 hooks/useBiometricUnlock.js），而没指纹/人脸的人
+   *              —— 尤其是加在主屏幕的独立 App（passkey 用不了）—— 原来
+   *              连一个快捷入口都没有。设置页里的一行没人会发现，必须提。
+   *
+   * 已有本地 passkey 的设备不再提：他已经有“一秒进 App”的路了，再让他记一个码
+   * 是给他加负担（而不是给他方便）。
    */
   const offer = useCallback(async (targetPath) => {
     target.current = targetPath || "/dashboard";
     try {
-      const token = await loadToken();
-      if (!isNative() || readBioOptOut() || token) return false;
+      // ① 共同前置条件：拒绝过就不再问；已经设过 PIN 也不问
+      if (readBioOptOut()) return false;
+      if (readPinSettings().enabled) return false;
+      if (!isPinSupported()) return false;
 
-      // 有生物识别就引导生物识别（体验更好、也更安全），
-      // 没有才退回 PIN —— 顺序不能反：能刷脸的人不该被要求再记一个码。
-      const hasBiometrics = await biometricAvailable();
-      const canOfferPin = isPinSupported() && !readPinSettings().enabled;
-      if (!hasBiometrics && !canOfferPin) return false;
+      let nextMode = "pin";
+      let nextVariant;
 
-      const nextMode = hasBiometrics ? "biometric" : "pin";
+      if (isNative()) {
+        // 安卓：本机已有凭据 = 生物识别已经开着，不需要再提什么
+        const token = await loadToken();
+        if (token) return false;
+        // 有生物识别就引导生物识别（体验更好、也更安全），
+        // 没有才退回 PIN —— 顺序不能反：能刷脸的人不该被要求再记一个码。
+        const hasBiometrics = await biometricAvailable();
+        nextMode = hasBiometrics ? "biometric" : "pin";
+        nextVariant = hasBiometrics ? undefined : "noBiometric";
+      } else {
+        // 网页：本机已经有一把 passkey → 有更快的路，不再提 PIN
+        if (hasPasskeyOnDevice()) return false;
+        // 独立 App（passkey 不支持）/ 浏览器不支持 WebAuthn → 文案要说“Face ID 在那里用不了”，
+        // 不能跟着安卓说“这台手机没有人脸”（那是假话：Face ID 是有的）。
+        nextVariant = isStandaloneWebApp() || !webauthnSupported() ? "noPasskey" : undefined;
+      }
+
       pendingOffer.mode = nextMode;
+      pendingOffer.variant = nextVariant;
       pendingOffer.submitPin = (pin, len) => pinSubmitRef.current?.(pin, len);
       setMode(nextMode);
+      setVariant(nextVariant);
       setOpen(true);
       setBusy(false);
       setError("");
@@ -170,6 +205,7 @@ export function useBiometricEnrol(onDone) {
     busy: busy || pinSetup.busy,
     error: error || (mode === "pin" ? pinSetup.error : ""),
     mode,
+    variant,
     offer,
     enable,
     enablePin,
@@ -187,11 +223,12 @@ export function useBiometricEnrol(onDone) {
  * @param {object} props
  * @param {"biometric"|"pin"} [props.mode] 不传时用本轮 offer 记下的方式（见 pendingOffer）
  */
-export function BiometricEnrolModal({ open, busy, error, mode, onEnable, onEnablePin, onSkip }) {
+export function BiometricEnrolModal({ open, busy, error, mode, variant, onEnable, onEnablePin, onSkip }) {
   const i18n = LOGIN_I18N[readLoginLang()] || LOGIN_I18N.en;
   const lang = readLoginLang();
   const tp = pinText(lang);
   const active = mode || pendingOffer.mode;
+  const activeVariant = variant ?? pendingOffer.variant;
   // 页面没传 onEnablePin（登录页）时，用 offer() 记下的那份
   const submitPin = onEnablePin || pendingOffer.submitPin;
 
@@ -213,12 +250,12 @@ export function BiometricEnrolModal({ open, busy, error, mode, onEnable, onEnabl
         <div className="sc-login-modal-box sc-login-modal-box--pin" role="dialog" aria-label={tp.setupTitle}>
           <PinSetupPanel
             lang={lang}
-            noBiometric
+            variant={activeVariant}
             title={tp.setupTitle}
             busy={busy}
             error={error}
             onCancel={onSkip}
-            cancelLabel={i18n.bioLater}
+            cancelLabel={i18n.bioLater || tp.later}
             onSubmit={(pin, len) => void submitPin?.(pin, len)}
           />
         </div>

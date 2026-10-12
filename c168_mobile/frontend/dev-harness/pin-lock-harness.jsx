@@ -21,12 +21,15 @@
  *   ?pin=4821&len=4                         → enrol a 4-digit PIN instead of the default 6
  *   ?web=1                                  → iOS / plain web (no native bridge)
  *   ?web=1&nopin=1                          → web with no PIN at all: must NOT lock
+ *   ?offer=1                                → only the post-login enrolment offer (no mode props on purpose)
+ *   ?standalone=1                           → pretend we are an iOS home-screen web app
  */
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { BiometricAuth, BiometryType } from "@aparajita/capacitor-biometric-auth";
 import BiometricLockGate from "../src/components/lock/BiometricLockGate.jsx";
+import { BiometricEnrolModal, useBiometricEnrol } from "../src/components/lock/BiometricEnrolModal.jsx";
 import { PinSetupModal } from "../src/components/lock/PinSetupModal.jsx";
 import { clearPin, createPin } from "../src/lib/pinStore.js";
 import "../src/styles/tokens.css";
@@ -50,6 +53,32 @@ const WEB = params.get("web") === "1";
 const NO_PIN = params.get("nopin") === "1";
 /** 只挂「设置 PIN」的弹窗（见下面 SetupHarness 的说明） */
 const SETUP_ONLY = params.get("setup") === "1";
+/** 只跑“登录后的引导”（登录页/二级密码页共用那一套） */
+const OFFER_ONLY = params.get("offer") === "1";
+/**
+ * 假装从 iOS「加到主屏幕」的独立 Web App 打开。
+ *
+ * 只有这个状态下 passkey 用不了，引导文案才该说“Face ID 在那里用不了”
+ * （而不是跟着安卓说“这台手机没有人脸”—— 那是假话）。
+ */
+const FAKE_STANDALONE = params.get("standalone") === "1";
+
+if (FAKE_STANDALONE && typeof window.matchMedia === "function") {
+  const original = window.matchMedia.bind(window);
+  window.matchMedia = (query) =>
+    String(query).includes("display-mode: standalone")
+      ? {
+          matches: true,
+          media: query,
+          onchange: null,
+          addEventListener() {},
+          removeEventListener() {},
+          addListener() {},
+          removeListener() {},
+          dispatchEvent: () => false,
+        }
+      : original(query);
+}
 
 /** 64 hex —— 与 includes/device_token.php 里签发的形状一致 */
 const DEVICE_TOKEN = "b".repeat(64);
@@ -129,6 +158,42 @@ function SetupHarness() {
   );
 }
 
+/**
+ * 只跑登录后的引导。
+ *
+ * ⚠️ 故意**不传** mode / variant / onEnablePin —— 这正是登录页的用法：
+ * 真机上这套参数靠 BiometricEnrolModal.jsx 里的 pendingOffer 兜底。
+ * 如果只测“页面显式传参”的那条路，登录页上的 PIN 引导就可能静默失效
+ * （用户老老实实输两遍，然后什么都不发生）。
+ */
+function OfferHarness() {
+  const enrol = useBiometricEnrol((path) => {
+    window.__enrolDone = path;
+  });
+  const asked = React.useRef(false);
+
+  React.useEffect(() => {
+    if (asked.current) return;
+    asked.current = true;
+    window.__offerAgain = () => enrol.offer("/dashboard");
+    void (async () => {
+      window.__offerResult = await enrol.offer("/dashboard");
+    })();
+  }, [enrol]);
+
+  return (
+    <div id="offer-harness">
+      <BiometricEnrolModal
+        open={enrol.open}
+        busy={enrol.busy}
+        error={enrol.error}
+        onSkip={enrol.skip}
+        onEnable={() => void enrol.enable()}
+      />
+    </div>
+  );
+}
+
 function Harness() {
   const [ready, setReady] = useState(false);
 
@@ -166,6 +231,7 @@ function Harness() {
 
   if (!ready) return <div id="harness-loading">seeding…</div>;
   if (SETUP_ONLY) return <SetupHarness />;
+  if (OFFER_ONLY) return <OfferHarness />;
 
   return (
     <MemoryRouter initialEntries={["/dashboard"]}>

@@ -280,6 +280,7 @@ export default function SecondaryPasswordPage({ variant }) {
           busy={enrol.busy}
           error={enrol.error}
           mode={enrol.mode}
+          variant={enrol.variant}
           onSkip={enrol.skip}
           onEnable={() => void enrol.enable()}
           onEnablePin={(pin, len) => void enrol.enablePin(pin, len)}
