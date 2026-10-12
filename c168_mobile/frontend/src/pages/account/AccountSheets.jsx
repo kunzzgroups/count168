@@ -399,9 +399,13 @@ export function AccountFormSheet({ open, onClose, account, onLinkAccount }) {
           />
         </FormField>
         <FormField label={i18n.remark}>
-          <textarea
+          {/* Keyboard-owned (see KeyboardOwnedInput): the remark is prose and often Chinese, so React
+              must never write its value back while the IME owns the composition. */}
+          <KeyboardOwnedInput
             value={form.remark}
-            onChange={(e) => update("remark", e.target.value)}
+            initialValue={form.remark}
+            onValueChange={(text) => update("remark", text)}
+            multiline
             style={{ textTransform: "uppercase" }}
           />
         </FormField>
@@ -556,7 +560,7 @@ export function LinkAccountSheet({ open, onClose, account }) {
         <KeyboardOwnedInput
           value={query}
           onValueChange={setQuery}
-          composeThrottleMs={80}
+          filterOnCompositionEnd
           placeholder={i18n.searchAccounts}
         />
       </div>

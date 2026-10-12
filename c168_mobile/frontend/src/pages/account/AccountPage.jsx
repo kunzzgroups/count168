@@ -122,7 +122,7 @@ export default function AccountPage() {
         <KeyboardOwnedInput
           value={account.search}
           onValueChange={account.setSearch}
-          composeThrottleMs={80}
+          filterOnCompositionEnd
           placeholder={i18n.searchAccounts}
         />
       </label>

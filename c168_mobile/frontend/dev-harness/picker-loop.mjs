@@ -287,7 +287,11 @@ async function main() {
     );
     await sleep(200);
 
-    /* ── A) IME composition (Chinese / word-mode keyboard path) ── */
+    /* ── A) IME composition: intermediate states must NOT filter; the commit must ──
+       The reported "input and results are out of sync" came from filtering on intermediate composition
+       states (pinyin letters that are about to become Chinese characters). The contract is now: while
+       the IME owns the text the list stays where it was; when the composition commits, the list
+       catches up immediately — no delete, no Enter, no blur needed. */
     const compose = async (text) => {
       await send("Input.imeSetComposition", {
         text,
@@ -298,11 +302,43 @@ async function main() {
       return evalInPage("window.__harness.snapshot()");
     };
 
+    await evalInPage("window.__harness.setQuery(''); true");
+    await sleep(200);
+    const beforeComposition = await evalInPage("window.__harness.snapshot()");
     const composedDigits = await compose("2135");
     record(
-      "ime: list filters while composing (no delete needed)",
-      composedDigits.expected > 0 && composedDigits.rendered > 0 && composedDigits.prefixMatches,
-      { rendered: composedDigits.rendered, expected: composedDigits.expected, value: composedDigits.value },
+      "ime: an unfinished composition does not filter the list",
+      composedDigits.value === "2135" &&
+        composedDigits.rendered >= beforeComposition.rendered - 1 &&
+        composedDigits.rendered < 200 &&
+        !composedDigits.prefixMatches,
+      {
+        valueDuringComposition: composedDigits.value,
+        renderedDuringComposition: composedDigits.rendered,
+        renderedBefore: beforeComposition.rendered,
+        filteredOnIntermediate: composedDigits.prefixMatches,
+      },
+    );
+
+    /* commit it the way a keyboard does, then the list must match the committed text */
+    await evalInPage(`(() => {
+      const el = document.querySelector('.m-tx-account-picker-search input');
+      el.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: el.value }));
+      return true;
+    })()`);
+    await sleep(350);
+    const afterCommitIme = await evalInPage("window.__harness.snapshot()");
+    record(
+      "ime: committing the composition filters immediately (no delete needed)",
+      afterCommitIme.value === "2135" &&
+        afterCommitIme.expected > 0 &&
+        afterCommitIme.rendered > 0 &&
+        afterCommitIme.prefixMatches,
+      {
+        rendered: afterCommitIme.rendered,
+        expected: afterCommitIme.expected,
+        value: afterCommitIme.value,
+      },
     );
 
     await send("Input.imeSetComposition", { text: "", selectionStart: 0, selectionEnd: 0 });
@@ -410,13 +446,15 @@ async function main() {
           }),
         );
       }
+      /* the keyboard commits the word, as a real one always does */
+      input.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: input.value }));
       return { value: input.value };
     })()`);
     await sleep(600);
     const afterBurst = await evalInPage("window.__harness.snapshot()");
     const burstMetrics = await evalInPage("window.__harness.metrics()");
     record(
-      "ime: a burst of composition updates stays cheap and still catches up",
+      "ime: a burst of composition updates stays cheap and catches up on commit",
       burst.value === "1015" &&
         afterBurst.rendered > 0 &&
         afterBurst.prefixMatches &&
@@ -588,6 +626,59 @@ async function main() {
           maxFrameGap: Math.round(metrics.maxFrameGap),
           totalLongTask: Math.round(metrics.totalLongTask),
         },
+      );
+    }
+
+    /* ── G) prose field (remark): Chinese composition + backspace must behave natively ──
+       The reported symptom was "after typing a few Chinese characters the first Backspace does nothing".
+       A controlled value writes itself back while the IME still owns the text and desynchronises the
+       keyboard's buffer; this field is keyboard-owned now, so the delete must hit real text. */
+    const remarkExists = await evalInPage("!!window.__harness.formField('remark')");
+    if (!remarkExists) {
+      record("form: a Chinese remark deletes natively (first Backspace works)", false, {
+        error: "remark field not found",
+      });
+    } else {
+      const remark = await evalInPage(`(() => {
+        const el = window.__harness.formField('remark');
+        el.focus();
+        el.value = '';
+        el.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: '' }));
+        el.dispatchEvent(
+          new InputEvent('input', { bubbles: true, isComposing: true, data: '\u4e2d\u6587', inputType: 'insertCompositionText' }),
+        );
+        el.value = '\u4e2d\u6587';
+        el.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '\u4e2d\u6587' }));
+        return el.value;
+      })()`);
+      /* force a re-render of the sheet, which a controlled value would use to write itself back */
+      await evalInPage("window.__harness.scrollOptionsToEnd && true");
+      await evalInPage(`(() => {
+        const el = window.__harness.formField('remark');
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        return true;
+      })()`);
+      await sleep(250);
+      const afterRerenderRemark = await evalInPage("(() => { const el = window.__harness.formField('remark'); return el ? el.value : null; })()");
+      for (const type of ["rawKeyDown", "keyUp"]) {
+        await send("Input.dispatchKeyEvent", {
+          type,
+          key: "Backspace",
+          code: "Backspace",
+          windowsVirtualKeyCode: 8,
+          nativeVirtualKeyCode: 8,
+        });
+      }
+      await sleep(250);
+      const afterRemarkDelete = await evalInPage(
+        "(() => { const el = window.__harness.formField('remark'); return el ? el.value : null; })()",
+      );
+      record(
+        "form: a Chinese remark deletes natively (first Backspace works)",
+        remark === "\u4e2d\u6587" &&
+          afterRerenderRemark === "\u4e2d\u6587" &&
+          afterRemarkDelete === "\u4e2d",
+        { valueAfterComposition: remark, valueAfterRerender: afterRerenderRemark, valueAfterDelete: afterRemarkDelete },
       );
     }
 

@@ -263,7 +263,7 @@ function AccountPicker({
               /* Sogou/中文输入法在旧机上会持续保持组合：组合期间把过滤合并到每 80ms 一次，
                  并交给 React 以 transition 处理 —— 列表重渲染永远不会拖住键盘（用户报的
                  “输入后按删除延迟”就是这么来的）。 */
-              composeThrottleMs={80}
+              filterOnCompositionEnd
               placeholder={searchPlaceholder}
               autoComplete="off"
               autoCorrect="off"
@@ -1038,10 +1038,18 @@ export default function AddTransactionSheet({
           {!isRate ? (
             <div className="m-tx-form-field">
               <label className="m-tx-form-label">{m.remark}</label>
-              <textarea
+              {/*
+               * Keyboard-owned: this is the field users type Chinese into. A controlled value would be
+               * written back while the IME still owns the text, which desynchronises the keyboard's own
+               * buffer — the reported "the first backspace does nothing". No composition forcing here:
+               * candidate selection must keep working.
+               */}
+              <KeyboardOwnedInput
                 value={txRemark}
+                initialValue={txRemark}
+                onValueChange={setTxRemark}
                 disabled={mutationsBlocked}
-                onChange={(e) => setTxRemark(e.target.value)}
+                multiline
                 rows={2}
                 className="m-tx-form-textarea"
               />

@@ -157,7 +157,7 @@ export default function DomainPage() {
         <KeyboardOwnedInput
           value={domain.search}
           onValueChange={(text) => domain.setSearch(forceSearchValue(text))}
-          composeThrottleMs={80}
+          filterOnCompositionEnd
           placeholder={t("searchPlaceholder")}
         />
       </label>

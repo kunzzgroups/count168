@@ -38,13 +38,14 @@ export default function KeyboardOwnedInput({
   onClear,
   clearButtonClassName,
   /**
-   * Live-filter fields only. While the IME owns a composition — Sogou and other Chinese keyboards
-   * keep one open, which is also why the first backspace looks ignored — coalesce updates to at most
-   * one per N ms and hand them to React as a transition, so re-rendering the result list can never
-   * stall the keyboard on a slow phone. `0` (default) keeps updates immediate: form fields are read
-   * on submit and must never be a keystroke behind.
+   * Live-filter fields only. While the IME owns a composition the text on screen is *intermediate*
+   * (pinyin letters that are about to become Chinese characters), so filtering on it shows the wrong
+   * list — "the result does not match what I typed". Those keystrokes are therefore not published;
+   * the committed text is published on `compositionend` (and on blur, in case an IME never sends one).
+   *
+   * Plain typing is never delayed by this — only intermediate composition states are skipped.
    */
-  composeThrottleMs = 0,
+  filterOnCompositionEnd = false,
   /**
    * Force the keyboard to *commit* a composition after the user pauses for this many ms (0 = never).
    *
@@ -72,6 +73,8 @@ export default function KeyboardOwnedInput({
    * typed.
    */
   applyValueOnBlur = false,
+  /** Render a `<textarea>` instead of an `<input>` (prose fields: remarks, notes). */
+  multiline = false,
   /** Optional outer ref (e.g. to focus the field when a panel opens). */
   inputRef: externalRef,
   ...inputProps
@@ -85,11 +88,7 @@ export default function KeyboardOwnedInput({
   valueRef.current = value;
   /** Only maintained when a ✕ is rendered — login/password fields do not need it. */
   const needsText = Boolean(clearLabel);
-  /** Coalescing clock for `composeThrottleMs`. */
-  const lastCallRef = useRef(0);
-  /** Trailing flush for a coalesced update, so a pause (no compositionend) still catches up. */
-  const flushTimerRef = useRef(0);
-  const defer = composeThrottleMs > 0;
+  const defer = filterOnCompositionEnd;
   const commitOnIdle = commitCompositionOnIdleMs > 0;
   const commitOnInput = Boolean(commitCompositionOnInput);
   /** The last text we published or adopted — compared against, never written back blindly. */
@@ -105,13 +104,6 @@ export default function KeyboardOwnedInput({
     const el = inputRef.current;
     if (!el) return undefined;
     lastTextRef.current = el.value;
-
-    const cancelFlush = () => {
-      if (flushTimerRef.current) {
-        window.clearTimeout(flushTimerRef.current);
-        flushTimerRef.current = 0;
-      }
-    };
 
     /*
      * Composition-idle commit (see the prop's comment): while the keyboard holds a composition, wait
@@ -145,11 +137,9 @@ export default function KeyboardOwnedInput({
 
     /** Hand the field's current text to the caller (unless it is what we already published). */
     const applyNow = () => {
-      cancelFlush();
       const text = el.value;
       if (text === lastTextRef.current) return;
       lastTextRef.current = text;
-      lastCallRef.current = performance.now();
       if (needsText) setText(text);
       if (defer) startTransition(() => onValueChangeRef.current?.(text));
       else onValueChangeRef.current?.(text);
@@ -160,14 +150,12 @@ export default function KeyboardOwnedInput({
 
     const publish = (event) => {
       const composing = Boolean(event && event.type === "input" && event.isComposing);
-      if (defer && composing && performance.now() - lastCallRef.current < composeThrottleMs) {
-        /* Coalesce, but always schedule the trailing flush: the user may simply stop typing with the
-           composition still open, and the list must still catch up to what they see. */
-        if (!flushTimerRef.current) {
-          flushTimerRef.current = window.setTimeout(applyNow, composeThrottleMs);
-        }
-        return;
-      }
+      /*
+       * Live-filter fields: never publish an intermediate composition state. The text at that moment
+       * is pinyin (or an unfinished word), so filtering on it would show a list that does not match
+       * what the user typed — and the committed text arrives right after on `compositionend` anyway.
+       */
+      if (defer && composing) return;
       applyNow();
     };
 
@@ -186,6 +174,11 @@ export default function KeyboardOwnedInput({
      */
     const onBlur = () => {
       cancelIdle();
+      /*
+       * Belt and braces for the live-filter case: if an IME never sends `compositionend`, blur is the
+       * last chance to hand the field's text over, so the list cannot stay stuck on a stale keyword.
+       */
+      if (defer) applyNow();
       if (!applyValueOnBlur) return;
       const external = valueRef.current;
       if (external === undefined || external === el.value || external === lastTextRef.current) return;
@@ -200,7 +193,6 @@ export default function KeyboardOwnedInput({
     el.addEventListener("compositionend", onCompositionEnd);
     el.addEventListener("blur", onBlur);
     return () => {
-      cancelFlush();
       cancelIdle();
       el.removeEventListener("input", publish);
       el.removeEventListener("compositionend", publish);
@@ -208,7 +200,7 @@ export default function KeyboardOwnedInput({
       el.removeEventListener("compositionend", onCompositionEnd);
       el.removeEventListener("blur", onBlur);
     };
-  }, [needsText, defer, composeThrottleMs, commitOnIdle, commitCompositionOnIdleMs, commitOnInput, applyValueOnBlur]);
+  }, [needsText, defer, commitOnIdle, commitCompositionOnIdleMs, commitOnInput, applyValueOnBlur]);
 
   useEffect(() => {
     const el = inputRef.current;
@@ -248,7 +240,11 @@ export default function KeyboardOwnedInput({
         `value`/`onChange` are deliberately dropped: see the note above. The field is uncontrolled,
         so React never overwrites what the keyboard put there.
       */}
-      <input ref={attachRef} type="text" defaultValue={initialValue} {...inputProps} />
+      {multiline ? (
+        <textarea ref={attachRef} defaultValue={initialValue} {...inputProps} />
+      ) : (
+        <input ref={attachRef} type="text" defaultValue={initialValue} {...inputProps} />
+      )}
       {clearLabel && text ? (
         <button
           type="button"
