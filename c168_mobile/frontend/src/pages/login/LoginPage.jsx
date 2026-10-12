@@ -12,6 +12,7 @@ import { useBiometricEnrol, BiometricEnrolModal } from "../../components/lock/Bi
 import { readLastCompanyId, writeLastCompanyId } from "../../lib/lastLoginPrefs.js";
 import KeyboardOwnedInput from "../../components/KeyboardOwnedInput.jsx";
 import { formatTypingReport, readTypingReport, startTypingProbe } from "../../lib/typingProbe.js";
+import { applyLiteMode, isLiteMode, noteTypingReport, setLiteMode } from "../../lib/liteMode.js";
 import { onBrandLogoError } from "../../lib/brandAssets.js";
 
 // 登录页 logo：先播拼图动图（webp，54 帧），放完换成静态图。
@@ -256,9 +257,18 @@ export default function LoginPage() {
    * the build marker shows this device's WebView version and the per-keystroke paint latency.
    */
   const [typingReport, setTypingReport] = useState(null);
+  /**
+   * Lite mode: see lib/liteMode.js. `?lite=1` / `?lite=0` flips it on the device in one tap, which is
+   * the fastest way to tell whether the page's own paint cost is what makes typing lag in the WebView.
+   */
+  const [lite, setLite] = useState(() => isLiteMode());
   useEffect(() => {
     startTypingProbe();
   }, []);
+  useEffect(() => {
+    applyLiteMode(lite);
+    if (lite) setLogoSrc((current) => (current === LOGO_STATIC ? current : LOGO_STATIC));
+  }, [lite]);
 
   const verifyTimeoutRef = useRef(null);
   const langThumbRef = useRef(null);
@@ -805,7 +815,15 @@ export default function LoginPage() {
           {/* 构建标记：报障时让用户念这一行，就能判断他跑的是哪份 bundle
               （手机版是远程 SPA，不重载就一直是旧的；这样能直接排除“旧代码”这一层）。
               点一下 → 显示本机的 WebView 版本与实测按键延迟（见 lib/typingProbe.js）。 */}
-          <button type="button" className="sc-login-build" onClick={() => setTypingReport(readTypingReport())}>
+          <button
+            type="button"
+            className="sc-login-build"
+            onClick={() => {
+              const report = readTypingReport();
+              setTypingReport(report);
+              if (noteTypingReport(report)) setLite(true);
+            }}
+          >
             build {BUILD_ID}
           </button>
           {typingReport ? (
@@ -813,6 +831,14 @@ export default function LoginPage() {
               <pre className="sc-login-diag" onClick={() => setTypingReport(null)}>
                 {formatTypingReport(typingReport)}
               </pre>
+              {/* One tap on the real device: lite visuals on/off. */}
+              <button
+                type="button"
+                className="sc-login-diag-link"
+                onClick={() => setLite(setLiteMode(!lite))}
+              >
+                {lite ? "极简模式：开 · lite mode: on" : "极简模式：关 · lite mode: off"}
+              </button>
               {/* Opens in the same WebView as the app itself — that is the point: the test page has to
                   run in the APK's engine, not in Chrome, to say anything about the APK. */}
               <a className="sc-login-diag-link" href="input-test.html">

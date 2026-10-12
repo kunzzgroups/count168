@@ -977,3 +977,59 @@ body.is-typing .sc-login-maintenance-track {
   color: rgba(255, 255, 255, 0.55);
   text-decoration: underline;
 }
+
+/*
+ * Lite mode — `body.lite`, see src/lib/liteMode.js.
+ *
+ * Same layout, every expensive visual removed: the full-screen cover bitmap, the blurred glow layer,
+ * gradients, shadows and the fade/marquee animations all become flat colour. Why: the app renders in
+ * the device's Android System WebView (single process — page paint competes with the keyboard's own
+ * calls), and the login page is where users type. Toggle per device with `?lite=1` / `?lite=0`, from
+ * the diagnostics panel, or automatically once typing has been measured as slow there.
+ */
+body.lite.bg,
+body.lite.bg #root {
+  background-image: none !important;
+  background-color: #0b1b3a !important;
+}
+
+body.lite .sc-login-lang-ios::after,
+body.lite .sc-login-lang-switch::after,
+body.lite .sc-login-lang-ios-thumb::before,
+body.lite .sc-login-lang-thumb::before {
+  display: none !important; /* blurred glow layer + blend-mode sweep */
+}
+
+body.lite .sc-login-card,
+body.lite .sc-login-card--secondary,
+body.lite .sc-login-lang-ios,
+body.lite .sc-login-lang-thumb,
+body.lite .sc-login-lang-ios-thumb,
+body.lite .sc-login-btn,
+body.lite .sc-login-submit-btn,
+body.lite .sc-login-lang-seg {
+  background-image: none !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+}
+
+body.lite .sc-login-card,
+body.lite .sc-login-card--secondary {
+  background: #ffffff !important;
+}
+
+body.lite .sc-login-lang-ios {
+  background: #eef3fb !important;
+}
+
+body.lite .sc-login-lang-thumb,
+body.lite .sc-login-lang-ios-thumb,
+body.lite .sc-login-submit-btn {
+  background: #2563eb !important;
+}
+
+body.lite .sc-login-shell,
+body.lite .sc-login-maintenance-track,
+body.lite .sc-login-maintenance-item {
+  animation: none !important;
+}

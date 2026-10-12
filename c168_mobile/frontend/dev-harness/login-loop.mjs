@@ -200,6 +200,44 @@ async function main() {
     });
     await sleep(500);
 
+    /* ── D-1) lite mode: `?lite=1` must actually flatten the page on the device ──
+       (It is also the fastest way to test on a real phone whether the page's own paint cost is what
+       makes typing lag inside the WebView — see lib/liteMode.js.) */
+    const withFlag = (flag) => `${URL_UNDER_TEST}${URL_UNDER_TEST.includes("?") ? "&" : "?"}${flag}`;
+    await send("Page.navigate", { url: withFlag("lite=1") });
+    await waitFor(() => evalInPage("!!document.querySelector('#company-id')"), {
+      label: "login form (lite)",
+      timeout: 40000,
+    });
+    await sleep(400);
+    const liteState = await evalInPage(`(() => {
+      const card = document.querySelector('.sc-login-card');
+      const lang = document.querySelector('.sc-login-lang-ios') || document.querySelector('.sc-login-shell');
+      const glow = lang ? getComputedStyle(lang, '::after') : null;
+      return {
+        hasClass: document.body.classList.contains('lite'),
+        backgroundImage: getComputedStyle(document.body).backgroundImage,
+        cardBackground: card ? getComputedStyle(card).backgroundColor : null,
+        glowHidden: !glow || glow.display === 'none',
+      };
+    })()`);
+    record(
+      "login: lite mode (?lite=1) flattens the expensive visuals",
+      liteState.hasClass &&
+        liteState.backgroundImage === "none" &&
+        liteState.glowHidden &&
+        /^rgb\(255, 255, 255\)$/.test(String(liteState.cardBackground)),
+      liteState,
+    );
+
+    /* Back to the normal variant for everything below. */
+    await send("Page.navigate", { url: withFlag("lite=0") });
+    await waitFor(() => evalInPage("!!document.querySelector('#company-id')"), {
+      label: "login form (full)",
+      timeout: 40000,
+    });
+    await sleep(500);
+
     /**
      * The phone's keyboard writes the text into the field itself (no event reaches React), and the
      * form re-renders for an unrelated reason — exactly the sequence that made characters vanish.
