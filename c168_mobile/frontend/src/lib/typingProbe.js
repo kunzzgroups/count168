@@ -72,6 +72,19 @@ export function startTypingProbe() {
       firstKeydownAt: 0,
       firstInputAt: 0,
       lastInputAt: 0,
+      /** End of the last typed character; the reported symptom is measured from here. */
+      lastInsertAt: 0,
+      /** Last typed character -> first delete event. "Type, press delete once, nothing happens." */
+      firstDeleteAfterTypingMs: null,
+      /** Backspace keydown -> the delete event it produced (does the press reach the page at all?). */
+      lastBackspaceKeydownAt: 0,
+      keydownToDeleteMs: null,
+      /**
+       * Ring buffer of the last events with millisecond offsets. The aggregate counters say *that*
+       * events arrive late; this says *where* the wait is: before the keydown (the press never reached
+       * the page), between keydown and the edit (Chromium's IME path), or inside the page.
+       */
+      timeline: [],
       /** Gap between the two input events before the last one (to detect catch-up pairs). */
       prevInputGapMs: 0,
       maxInputGapMs: 0,
@@ -86,6 +99,13 @@ export function startTypingProbe() {
     sessions.unshift({ ...current, endedAt: performance.now() });
     if (sessions.length > MAX_SESSIONS) sessions.length = MAX_SESSIONS;
     current = null;
+  };
+
+  /* One timeline entry. Short codes keep the panel narrow enough to read in a screenshot. */
+  const mark = (code) => {
+    if (!current) return;
+    current.timeline.push({ t: Math.round(performance.now() - current.startedAt), c: code });
+    if (current.timeline.length > 40) current.timeline.shift();
   };
 
   document.addEventListener(
@@ -126,23 +146,35 @@ export function startTypingProbe() {
       const inputType = String(event.inputType || "");
       const target = event.target;
       const isDelete = inputType.indexOf("delete") === 0;
-      if (isDelete) current.deleteInputs += 1;
-      else current.insertInputs += 1;
-      if (event.isComposing) current.composingDeletes += isDelete ? 1 : 0;
 
       /* Did the delete actually shorten the field? (An IME can fire delete events while editing its
          own composition, in which case the text the user sees does not change.) */
+      let afterLen = null;
       try {
         if (target && typeof target.value === "string") {
           const before = lastLengths.get(target);
-          const after = target.value.length;
-          if (isDelete && before !== undefined && after < before) current.valueShrinks += 1;
-          lastLengths.set(target, after);
+          afterLen = target.value.length;
+          if (isDelete && before !== undefined && afterLen < before) current.valueShrinks += 1;
+          lastLengths.set(target, afterLen);
         }
       } catch {
         /* ignore */
       }
 
+      if (isDelete) {
+        current.deleteInputs += 1;
+        if (event.isComposing) current.composingDeletes += 1;
+        if (current.lastInsertAt && current.firstDeleteAfterTypingMs === null) {
+          current.firstDeleteAfterTypingMs = Math.round(now - current.lastInsertAt);
+        }
+        if (current.lastBackspaceKeydownAt && current.keydownToDeleteMs === null) {
+          current.keydownToDeleteMs = Math.round(now - current.lastBackspaceKeydownAt);
+        }
+      } else {
+        current.insertInputs += 1;
+        current.lastInsertAt = now;
+      }
+      mark(`${isDelete ? "-" : "+"}${afterLen === null ? "?" : afterLen}${event.isComposing ? "~" : ""}`);
       const startedAt = performance.now();
       requestAnimationFrame(() => {
         if (!current) return;
@@ -153,8 +185,13 @@ export function startTypingProbe() {
   );
   document.addEventListener(
     "beforeinput",
-    () => {
-      if (current) current.beforeInputs += 1;
+    (event) => {
+      if (!current) return;
+      current.beforeInputs += 1;
+      /* Only deletes go on the timeline: inserts would drown the transition we are measuring. */
+      if (String(event.inputType || "").indexOf("delete") === 0) {
+        mark(`bi${event.isComposing ? "~" : ""}${event.cancelable === false ? "x" : ""}`);
+      }
     },
     true,
   );
@@ -162,8 +199,13 @@ export function startTypingProbe() {
     "keydown",
     (event) => {
       if (!current) return;
-      if (!current.firstKeydownAt) current.firstKeydownAt = performance.now();
-      if (event.key === "Backspace" || event.keyCode === 8) current.backspaces += 1;
+      const now = performance.now();
+      if (!current.firstKeydownAt) current.firstKeydownAt = now;
+      if (event.key === "Backspace" || event.keyCode === 8) {
+        current.backspaces += 1;
+        current.lastBackspaceKeydownAt = now;
+        mark("kdBS");
+      }
     },
     true,
   );
@@ -171,6 +213,14 @@ export function startTypingProbe() {
     "compositionstart",
     () => {
       if (current) current.compositions += 1;
+      mark("cs");
+    },
+    true,
+  );
+  document.addEventListener(
+    "compositionend",
+    () => {
+      mark("ce");
     },
     true,
   );
@@ -180,6 +230,7 @@ export function startTypingProbe() {
     "ec:composition-committed",
     () => {
       if (current) current.forcedCommits += 1;
+      mark("hc");
     },
     true,
   );
@@ -206,6 +257,23 @@ function stats(values) {
   };
 }
 
+function timelineRows(entries, max = 16) {
+  const shown = entries.slice(-max);
+  const rows = [];
+  for (let i = 0; i < shown.length; i += 1) {
+    const gap = i === 0 || shown[i].t - shown[i - 1].t < 300 ? "" : ` D${shown[i].t - shown[i - 1].t}`;
+    const cell = `+${shown[i].t} ${shown[i].c}${gap}`;
+    if (i % 2 === 0) rows.push(`  ${cell}`);
+    else rows[rows.length - 1] += `   ${cell}`;
+  }
+  return rows;
+}
+
+/**
+ * Codes: `kdBS` backspace keydown · `bi` beforeinput delete (`~` composing, `x` not cancelable) ·
+ * `+N`/`-N` input leaving N characters (`~` composing) · `cs`/`ce` composition start/end ·
+ * `hc` composition handed over by us · ` D<n>` marks a gap of n ms since the previous event.
+ */
 function webViewLine() {
   const ua = (typeof navigator !== "undefined" && navigator.userAgent) || "";
   const chrome = ua.match(/Chrome\/([\d.]+)/);
@@ -272,6 +340,9 @@ export function readTypingReport() {
               : null,
           maxInputGapMs: Math.round(session.maxInputGapMs),
           bursts: session.bursts,
+          firstDeleteAfterTypingMs: session.firstDeleteAfterTypingMs,
+          keydownToDeleteMs: session.keydownToDeleteMs,
+          timeline: session.timeline,
           paintLatency: stats(session.latencies),
           longTaskMs: session.longTaskMs,
         }
@@ -344,6 +415,20 @@ export function formatTypingReport(report) {
         : "paint latency: n/a",
       `main-thread blocks: ${s.longTaskMs}ms total`,
     );
+    /* The measurable form of the complaint: type, press delete once, nothing happens. */
+    if (s.firstDeleteAfterTypingMs !== null) {
+      lines.push(
+        `!! first delete after typing: ${s.firstDeleteAfterTypingMs}ms` +
+          (s.keydownToDeleteMs !== null ? ` · backspace keydown -> delete: ${s.keydownToDeleteMs}ms` : ""),
+      );
+      if (s.keydownToDeleteMs === null) {
+        lines.push("   => no backspace keydown reached the page: the press was consumed before the page");
+      }
+    }
+    if (s.timeline && s.timeline.length) {
+      lines.push("timeline (+ms | event | D = gap since previous):");
+      for (const row of timelineRows(s.timeline)) lines.push(row);
+    }
     if (s.paintLatency && s.paintLatency.avg > 120) {
       lines.push("=> slow: send this screenshot to support");
     }

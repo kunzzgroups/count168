@@ -625,6 +625,47 @@ async function main() {
       { captured, expected: CREDENTIALS },
     );
 
+    /* F0) the per-event timeline — this is what locates a stall on the real device, so it has to
+       survive: type a few characters, press backspace once, then read the panel. */
+    await send("Page.navigate", { url: withFlag("commit=on-backspace") });
+    await waitFor(() => evalInPage("!!document.querySelector('#company-id')"), {
+      label: "login form (timeline)",
+      timeout: 40000,
+    });
+    await sleep(300);
+    await evalInPage(
+      "(() => { const el = document.querySelector('#user-id'); el.focus(); el.value = ''; return true; })()",
+    );
+    for (const ch of ["a", "b", "c"]) {
+      await send("Input.insertText", { text: ch });
+      await sleep(60);
+    }
+    for (const type of ["rawKeyDown", "keyUp"]) {
+      await send("Input.dispatchKeyEvent", {
+        type,
+        key: "Backspace",
+        code: "Backspace",
+        windowsVirtualKeyCode: 8,
+        nativeVirtualKeyCode: 8,
+      });
+    }
+    await sleep(300);
+    await evalInPage(
+      "(() => { const el = document.querySelector('.sc-login-build'); if (el) el.click(); return true; })()",
+    );
+    await sleep(300);
+    const timelineText = await evalInPage(
+      "(() => { const el = document.querySelector('.sc-login-diag'); return el ? el.textContent : null; })()",
+    );
+    record(
+      "login: typing report carries a per-event timeline (locates the stall on-device)",
+      Boolean(timelineText) &&
+        /timeline/i.test(timelineText) &&
+        /kdBS/.test(timelineText) &&
+        /first delete after typing: \d+ms/i.test(timelineText),
+      { tail: timelineText ? timelineText.slice(-400) : null },
+    );
+
     /* F) the on-device typing report — the only way to measure a real phone + Sogou */
     await evalInPage(
       "(() => { const el = document.querySelector('.sc-login-build'); if (el) el.click(); return true; })()",
