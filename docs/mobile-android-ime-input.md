@@ -99,3 +99,43 @@ node dev-harness/search-sweep.mjs    # 其它页面接线（无后端时会如�
 3. 让用户在 **Chrome 里打开同一个站点**做同样操作（同一个 Blink/WebView 引擎）→
    Chrome 顺、APK 卡 = 壳层（WebView 版本 / `captureInput` / 键盘模式）；两边都卡 = 设备+输入法
 4. 记录：机型 / 安卓版本 / 输入法名+版本 / 哪个字段 / APK 还是浏览器 / 是否只在弱网、低电量、后台多时出现
+
+## 9. 原生壳层审计（2026-10-12）与 A/B/C 对照
+
+### 审计结论（`c168_mobile/app/android`：全部原生代码只有 3 个 Java 文件）
+
+| 检查项 | 结论 |
+|---|---|
+| 自定义 WebView 子类 / `onTouchEvent` / `dispatchKeyEvent` / `onCreateInputConnection` | **无** |
+| 自定义按键拦截 / 焦点修改 / `InputConnection` 干预 | **无** |
+| `evaluateJavascript` / `loadUrl` / 自建 JS 桥 / 每次输入的原生↔JS 通信 | **无**（只有 Capacitor 自带的桥） |
+| `WebSettings` / `setLayerType` / 渲染优先级 / 硬件加速覆盖 | **无** |
+| Manifest：`windowSoftInputMode` / `hardwareAccelerated` / `importantForAutofill` | **均未设置**（走系统默认） |
+| 主题：`windowIsTranslucent`（会掉硬件加速） | **无**（`AppTheme.NoActionBar`） |
+| `MainActivity` 自有代码 | 仅系统栏 insets + 返回键走 WebView 历史 |
+| `android.captureInput: true` | Capacitor 8 里**只有配置字段与 getter、无任何调用点** → 死配置 |
+
+→ **App 与 Chrome 的差异不在我们的原生代码里**，而在 WebView 实例/引擎本身：设备上的
+**Android System WebView** 与 Chrome 是两套可独立更新的组件（Chrome 很新、WebView 很旧是最常见的组合）。
+
+### 需要收集的两组真机数据
+
+1. 登录页 `build` 标记 → 面板里的 **`app webview:`** 行（需 APK ≥ 本次改动）：
+   `WebView.getCurrentWebViewPackage()` 的真实包名+版本 + Android 版本（用于对比“卡的设备 vs 不卡的设备”）。
+2. 同一台手机三组对照：**A** App 内 `/c168_mobile/frontend/dist/input-test.html`（裸输入框）、
+   **B** App 内正式页面、**C** Chrome 打开同一正式页面 —— 对比删除响应，并对 B 做 DevTools 录制。
+
+### 开 WebView 远程调试的诊断包
+
+```bash
+cd c168_mobile/app
+node build-apk-for-site.mjs com --diag     # → dist-apk/EazyCount-v<版本>-com-diag.apk
+```
+
+装到出问题的手机（同包名，**覆盖安装**；测完卸载重装正式包）→ 电脑 Chrome 打 `chrome://inspect` →
+对 **WebView 里的页面**录制 Performance，看：
+- `keydown → input → 下一次 layout/paint` 的耗时
+- 删除时 Main 线程长任务的**来源函数**
+- 与同机 Chrome 同一操作对比
+
+⚠️ 开了远程调试的包只能内部使用，**不要分发**。

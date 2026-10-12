@@ -1,6 +1,10 @@
 package com.count168.mobile;
 
+import android.content.pm.PackageInfo;
+import android.os.Build;
 import android.os.Bundle;
+import android.util.Log;
+import android.webkit.JavascriptInterface;
 import android.webkit.WebView;
 
 import androidx.activity.OnBackPressedCallback;
@@ -19,6 +23,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         applySystemBarInsets();
+        exposeWebViewInfo();
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override
             public void handleOnBackPressed() {
@@ -38,6 +43,51 @@ public class MainActivity extends BridgeActivity {
         super.onResume();
         // 兜底：旋转/切回前台/系统栏变化后再确认一次内边距
         applySystemBarInsets();
+    }
+
+    /**
+     * Read-only WebView facts for the in-page diagnostics panel (see src/lib/typingProbe.js).
+     *
+     * Why this has to come from native code: the app renders with the device's **Android System
+     * WebView**, which is a separate, independently updatable component. On the same phone Chrome can
+     * be far newer than that WebView, which is the leading explanation for "the same page is smooth
+     * in Chrome but lags inside the app". The user-agent string is not authoritative;
+     * `WebView.getCurrentWebViewPackage()` is.
+     *
+     * Exposure is deliberately limited to two read-only getters (a package/version string and an SDK
+     * byte) — nothing writable, no secrets — so it grants the loaded page no new capability.
+     */
+    private void exposeWebViewInfo() {
+        WebView webView = bridge == null ? null : bridge.getWebView();
+        if (webView == null) return;
+
+        webView.addJavascriptInterface(
+                new Object() {
+                    @JavascriptInterface
+                    public String version() {
+                        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+                            return "unknown (sdk " + Build.VERSION.SDK_INT + ")";
+                        }
+                        PackageInfo pkg = WebView.getCurrentWebViewPackage();
+                        return pkg == null ? "missing or disabled" : pkg.packageName + " " + pkg.versionName;
+                    }
+
+                    @JavascriptInterface
+                    public String device() {
+                        return "Android " + Build.VERSION.RELEASE + " (sdk " + Build.VERSION.SDK_INT + ")";
+                    }
+                },
+                "EazyCountNative");
+
+        Log.i("EazyCount", "WebView package: " + describeWebViewPackage());
+    }
+
+    private String describeWebViewPackage() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            return "unknown (sdk " + Build.VERSION.SDK_INT + ")";
+        }
+        PackageInfo pkg = WebView.getCurrentWebViewPackage();
+        return pkg == null ? "missing or disabled" : pkg.packageName + " " + pkg.versionName;
     }
 
     // targetSdk 35+ enforces edge-to-edge: the WebView extends behind the status

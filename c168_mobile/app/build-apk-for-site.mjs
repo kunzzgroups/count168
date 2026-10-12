@@ -3,6 +3,11 @@
 // 用法（在 c168_mobile/app 下）：
 //   npm i                 # 首次：装 @capacitor/cli 等
 //   node build-apk-for-site.mjs site|org|com
+//   node build-apk-for-site.mjs com --diag   # 内部诊断包：开 WebView 远程调试（chrome://inspect）
+//
+// `--diag` 会把 `android.webContentsDebuggingEnabled` 置为 true，用来给“App 内 WebView 卡”
+// 这种壳层问题做真机 Performance 录制（见 docs/mobile-android-ime-input.md）。
+// ⚠️ 开了远程调试后，任何 USB 调试者都能注入页面 —— 只能内部测试用，不要分发。
 //
 // 前置（均在本机、已被 gitignore）：
 //   keystore/eazycount.keystore       签名密钥
@@ -25,9 +30,10 @@ const appUrl = (host) => `https://${host}/c168_mobile/frontend/dist/`;
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const key = String(process.argv[2] || "").toLowerCase();
+const diag = process.argv.includes("--diag");
 const host = SITES[key];
 if (!host) {
-  console.error("用法: node build-apk-for-site.mjs site|org|com");
+  console.error("用法: node build-apk-for-site.mjs site|org|com [--diag]");
   process.exit(1);
 }
 
@@ -39,6 +45,10 @@ const originalWww = fs.readFileSync(wwwPath, "utf8");
 // 1) 把 server.url（以及兜底页的重连地址）改成这个域名
 const cfg = JSON.parse(originalCfg);
 cfg.server = { ...(cfg.server || {}), url: appUrl(host) };
+if (diag) {
+  cfg.android = { ...(cfg.android || {}), webContentsDebuggingEnabled: true };
+  console.warn("\n!! DIAG BUILD: WebView remote debugging is ON — internal testing only, do not ship.\n");
+}
 fs.writeFileSync(cfgPath, `${JSON.stringify(cfg, null, 2)}\n`);
 fs.writeFileSync(
   wwwPath,
@@ -86,7 +96,7 @@ try {
   fs.mkdirSync(outDir, { recursive: true });
   const gradle = fs.readFileSync(path.join(here, "android", "app", "build.gradle"), "utf8");
   const versionName = (gradle.match(/versionName\s+"([^"]+)"/) || [])[1] || "1.0";
-  const out = path.join(outDir, `EazyCount-v${versionName}-${key}.apk`);
+  const out = path.join(outDir, `EazyCount-v${versionName}-${key}${diag ? "-diag" : ""}.apk`);
   fs.copyFileSync(apk, out);
   console.log(`==> 产物: ${out}  (${(fs.statSync(out).size / 1048576).toFixed(2)} MB)`);
 } finally {

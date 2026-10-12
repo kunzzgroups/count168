@@ -152,7 +152,21 @@ function webViewLine() {
     android: android ? android[1] : null,
     cores: (typeof navigator !== "undefined" && navigator.hardwareConcurrency) || null,
     memoryGb: (typeof navigator !== "undefined" && navigator.deviceMemory) || null,
+    /* Authoritative values from the shell (MainActivity exposes EazyCountNative). The user-agent
+       string cannot tell us *which package* is rendering: this can. */
+    nativeWebView: readNative("version"),
+    nativeDevice: readNative("device"),
   };
+}
+
+function readNative(method) {
+  try {
+    const bridge = typeof window !== "undefined" ? window.EazyCountNative : null;
+    if (!bridge || typeof bridge[method] !== "function") return null;
+    return String(bridge[method]());
+  } catch {
+    return null;
+  }
 }
 
 /** Everything a bug report needs, as plain data. */
@@ -189,6 +203,11 @@ export function formatTypingReport(report) {
       `${report.android ? ` · Android ${report.android}` : ""}` +
       `${report.cores ? ` · ${report.cores} cores` : ""}`,
   ];
+  if (report.nativeWebView) {
+    /* The decisive line when comparing a laggy phone with a smooth one: which WebView *package* and
+       version is actually rendering, and on which Android build. */
+    lines.push(`app webview: ${report.nativeWebView}${report.nativeDevice ? ` · ${report.nativeDevice}` : ""}`);
+  }
   const s = report.session;
   if (!s) {
     lines.push("typing: no keystrokes recorded yet", "type in a field, then tap this line again");

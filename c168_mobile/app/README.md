@@ -37,6 +37,16 @@ npm run build:apk:org     # → dist-apk/EazyCount-v1.4-org.apk
 npm run build:apk:com     # → dist-apk/EazyCount-v1.4-com.apk
 ```
 
+内部诊断包（开 WebView 远程调试，用来给“App 内 WebView 输入卡顿”做真机 Performance 录制）：
+
+```bash
+node build-apk-for-site.mjs com --diag   # → dist-apk/EazyCount-v<版本>-com-diag.apk
+```
+
+它只多做一件事：把 `android.webContentsDebuggingEnabled` 置为 `true`（构建结束仍会还原
+`capacitor.config.json`）。⚠️ 开了远程调试的包只能内部测试用，**不要分发**。详见
+[`docs/mobile-android-ime-input.md`](../../docs/mobile-android-ime-input.md) 第 9 节。
+
 `build-apk-for-site.mjs` 会把 `capacitor.config.json` 的 `server.url` 与 `www/index.html` 的重连地址临时改成对应域名，跑 `cap sync` + Gradle release，把产物拷到 `dist-apk/`，最后还原这两个文件。首次构建要下载 Gradle 和依赖，等几分钟。
 
 前置（都在本机、已 gitignore）：
