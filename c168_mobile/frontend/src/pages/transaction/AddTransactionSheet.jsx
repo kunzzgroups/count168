@@ -803,15 +803,18 @@ export default function AddTransactionSheet({
               </div>
               <div className="m-tx-form-field">
                 <label className="m-tx-form-label">{m.amount}</label>
-                <input
-                  type="text"
-                  inputMode="decimal"
+                {/* Keyboard-owned: the sanitised value lives in state and is applied on blur, so typing
+                    never has letters/extra dots written back under the caret (see KeyboardOwnedInput). */}
+                <KeyboardOwnedInput
                   value={txAmount}
-                  disabled={mutationsBlocked}
-                  onChange={(e) => {
+                  initialValue={txAmount}
+                  onValueChange={(text) => {
                     setTxFullAmount("");
-                    setTxAmount(sanitizeAmountInput(e.target.value));
+                    setTxAmount(sanitizeAmountInput(text));
                   }}
+                  applyValueOnBlur
+                  disabled={mutationsBlocked}
+                  inputMode="decimal"
                   className="m-tx-form-input"
                 />
               </div>
@@ -875,15 +878,16 @@ export default function AddTransactionSheet({
                       </option>
                     ))}
                   </select>
-                  <input
-                    type="text"
-                    inputMode="decimal"
+                  <KeyboardOwnedInput
                     value={rateCurrencyFromAmount}
-                    disabled={mutationsBlocked}
-                    onChange={(e) => {
+                    initialValue={rateCurrencyFromAmount}
+                    onValueChange={(text) => {
                       setRateFullAmount("");
-                      setRateCurrencyFromAmount(sanitizeAmountInput(e.target.value));
+                      setRateCurrencyFromAmount(sanitizeAmountInput(text));
                     }}
+                    applyValueOnBlur
+                    disabled={mutationsBlocked}
+                    inputMode="decimal"
                     placeholder={m.amount}
                     className="m-tx-form-input"
                     aria-label={m.fromAccount}
@@ -991,12 +995,13 @@ export default function AddTransactionSheet({
                   aria-label={m.rateMultiplier}
                 />
                 <div className="m-tx-form-grid-2">
-                  <input
-                    type="text"
-                    inputMode="decimal"
+                  <KeyboardOwnedInput
                     value={rateMiddlemanInputAmount}
+                    initialValue={rateMiddlemanInputAmount}
+                    onValueChange={(text) => setRateMiddlemanInputAmount(sanitizePositiveAmountInput(text))}
+                    applyValueOnBlur
                     disabled={mutationsBlocked}
-                    onChange={(e) => setRateMiddlemanInputAmount(sanitizePositiveAmountInput(e.target.value))}
+                    inputMode="decimal"
                     onKeyDown={(e) => {
                       if (e.key === "-" || e.key === "Subtract") e.preventDefault();
                     }}
@@ -1004,12 +1009,13 @@ export default function AddTransactionSheet({
                     className="m-tx-form-input"
                     aria-label={m.fee}
                   />
-                  <input
-                    type="text"
-                    inputMode="decimal"
+                  <KeyboardOwnedInput
                     value={rateMiddlemanPlatformFee}
+                    initialValue={rateMiddlemanPlatformFee}
+                    onValueChange={(text) => setRateMiddlemanPlatformFee(sanitizePlatformFeeInput(text))}
+                    applyValueOnBlur
                     disabled={mutationsBlocked}
-                    onChange={(e) => setRateMiddlemanPlatformFee(sanitizePlatformFeeInput(e.target.value))}
+                    inputMode="decimal"
                     placeholder={m.platformFee}
                     className="m-tx-form-input"
                     aria-label={m.platformFee}

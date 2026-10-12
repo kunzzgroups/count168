@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useOverlayLock } from "../../hooks/useOverlayLock.js";
+import { useIncrementalList } from "../../hooks/useIncrementalList.js";
 import { formatLastLogin, normRole, sortAccessItems } from "../../lib/mobileUserAdmin.js";
 import PasswordInput from "../../components/PasswordInput.jsx";
 import KeyboardOwnedInput from "../../components/KeyboardOwnedInput.jsx";
@@ -182,6 +183,11 @@ function AccessPickerSheet({
     if (!q) return sorted;
     return sorted.filter((opt) => labelOf(opt).toLowerCase().includes(q));
   }, [sorted, query, labelOf]);
+  /**
+   * Same reasoning as the link-account picker: an option list (every account in the company) must not
+   * be re-rendered wholesale on each keystroke — mount a page and grow on scroll.
+   */
+  const paged = useIncrementalList(visible, 60);
   const bulkIdList = useMemo(() => {
     const ids = (options || []).map((opt) => Number(opt.id)).filter((id) => id > 0);
     const source = toggleableIds == null ? ids : ids.filter((id) => toggleableIds.has(id));
@@ -266,7 +272,7 @@ function AccessPickerSheet({
         </span>
       </div>
       <div className="m-admin-picker-list">
-        {visible.map((opt) => {
+        {paged.visible.map((opt) => {
           const id = Number(opt.id);
           const checked = selected.has(id);
           const itemLocked = isItemLocked(id);
@@ -287,6 +293,9 @@ function AccessPickerSheet({
             </button>
           );
         })}
+        {paged.hasMore ? (
+          <div ref={paged.sentinelRef} className="m-sheet-sentinel" aria-hidden="true" />
+        ) : null}
       </div>
     </Sheet>
   );
@@ -555,6 +564,9 @@ export function UserFormSheet({ open, onClose, admin }) {
                   placeholder={i18n.secondaryPasswordPlaceholder}
                   autoComplete="off"
                   inputMode="numeric"
+                  /* 6 digits max, enforced by the browser instead of rewriting every keystroke; the
+                     non-digit filter still runs on blur/submit (see KeyboardOwnedInput). */
+                  maxLength={6}
                   showLabel={i18n.showPassword}
                   hideLabel={i18n.hidePassword}
                 />

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useOverlayLock } from "../../hooks/useOverlayLock.js";
+import { useIncrementalList } from "../../hooks/useIncrementalList.js";
 import { buildAccountScopeDraft } from "../../lib/mobileAccountScope.js";
 import { formatDisplayDate } from "../../lib/dashboardDateUtils.js";
 import PasswordInput from "../../components/PasswordInput.jsx";
@@ -510,6 +511,12 @@ export function LinkAccountSheet({ open, onClose, account }) {
   const rows = account.linkPool.filter((row) =>
     `${row.account_id || ""} ${row.name || ""}`.toUpperCase().includes(query.toUpperCase()),
   );
+  /**
+   * Accounts can run into the thousands. Rendering the whole match set means every keystroke in the
+   * search box re-renders all of it (measured: this is what makes filtering feel heavy on a phone),
+   * so a page at a time is mounted and the rest follows as the list is scrolled.
+   */
+  const pagedRows = useIncrementalList(rows, 60);
   return (
     <Sheet
       open={open}
@@ -554,7 +561,7 @@ export function LinkAccountSheet({ open, onClose, account }) {
         />
       </div>
       <div className="m-account-check-list">
-        {rows.map((row) => (
+        {pagedRows.visible.map((row) => (
           <label key={row.id}>
             <input
               type="checkbox"
@@ -576,6 +583,9 @@ export function LinkAccountSheet({ open, onClose, account }) {
             <em>{row.role}</em>
           </label>
         ))}
+        {pagedRows.hasMore ? (
+          <div ref={pagedRows.sentinelRef} className="m-sheet-sentinel" aria-hidden="true" />
+        ) : null}
       </div>
     </Sheet>
   );

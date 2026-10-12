@@ -58,6 +58,15 @@ export default function KeyboardOwnedInput({
    * searches) — committing mid-composition would break pinyin input in a free-text field.
    */
   commitCompositionOnIdleMs = 0,
+  /**
+   * Apply `value` to the field once it loses focus (0 = never). Only for callers whose state holds a
+   * **normalised** version of the text (amounts strip letters, the 6-digit code strips non-digits).
+   *
+   * Callers that keep the text in a ref while typing (the login page) must leave this off: their
+   * `value` is deliberately stale during typing, so writing it on blur would erase what the user just
+   * typed.
+   */
+  applyValueOnBlur = false,
   /** Optional outer ref (e.g. to focus the field when a panel opens). */
   inputRef: externalRef,
   ...inputProps
@@ -66,6 +75,9 @@ export default function KeyboardOwnedInput({
   const [text, setText] = useState(initialValue);
   const onValueChangeRef = useRef(onValueChange);
   onValueChangeRef.current = onValueChange;
+  /** Latest external value, readable from the native listeners without re-binding them. */
+  const valueRef = useRef(value);
+  valueRef.current = value;
   /** Only maintained when a ✕ is rendered — login/password fields do not need it. */
   const needsText = Boolean(clearLabel);
   /** Coalescing clock for `composeThrottleMs`. */
@@ -158,10 +170,26 @@ export default function KeyboardOwnedInput({
       cancelIdle();
     };
 
+    /**
+     * Silent correction on blur: callers that keep a normalised value in state (amounts strip
+     * letters, the 6-digit code strips non-digits) get it applied once the user is done with the
+     * field — never while they are typing (see the adoption effect for why).
+     */
+    const onBlur = () => {
+      cancelIdle();
+      if (!applyValueOnBlur) return;
+      const external = valueRef.current;
+      if (external === undefined || external === el.value || external === lastTextRef.current) return;
+      el.value = external;
+      lastTextRef.current = external;
+      if (needsText) setText(external);
+    };
+
     el.addEventListener("input", publish);
     el.addEventListener("compositionend", publish);
     el.addEventListener("compositionstart", onCompositionStart);
     el.addEventListener("compositionend", onCompositionEnd);
+    el.addEventListener("blur", onBlur);
     return () => {
       cancelFlush();
       cancelIdle();
@@ -169,8 +197,9 @@ export default function KeyboardOwnedInput({
       el.removeEventListener("compositionend", publish);
       el.removeEventListener("compositionstart", onCompositionStart);
       el.removeEventListener("compositionend", onCompositionEnd);
+      el.removeEventListener("blur", onBlur);
     };
-  }, [needsText, defer, composeThrottleMs, commitOnIdle, commitCompositionOnIdleMs]);
+  }, [needsText, defer, composeThrottleMs, commitOnIdle, commitCompositionOnIdleMs, applyValueOnBlur]);
 
   useEffect(() => {
     const el = inputRef.current;
@@ -180,6 +209,16 @@ export default function KeyboardOwnedInput({
       lastTextRef.current = value;
       return;
     }
+    /*
+     * Hard rule: never write into a field the user is editing right now.
+     *
+     * Some callers deliberately keep a *normalised* value in state (amounts strip letters, the 6-digit
+     * code strips non-digits). Writing that back mid-typing moves the caret and can drop the keyboard's
+     * composition — the same class of bug that ate characters on the login page. The normalised value
+     * is applied when the field loses focus (or when the sheet is reset/closed), which is where a
+     * silent correction belongs.
+     */
+    if (document.activeElement === el) return;
     el.value = value;
     lastTextRef.current = value;
     if (needsText) setText(value);
