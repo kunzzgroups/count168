@@ -113,7 +113,7 @@ node dev-harness/search-sweep.mjs    # 其它页面接线（无后端时会如�
 | Manifest：`windowSoftInputMode` / `hardwareAccelerated` / `importantForAutofill` | **均未设置**（走系统默认） |
 | 主题：`windowIsTranslucent`（会掉硬件加速） | **无**（`AppTheme.NoActionBar`） |
 | `MainActivity` 自有代码 | 仅系统栏 insets + 返回键走 WebView 历史 |
-| `android.captureInput: true` | Capacitor 8 里**只有配置字段与 getter、无任何调用点** → 死配置 |
+| `android.captureInput: true` | **不是死配置（先前结论错误，已更正）**。Capacitor 8.5.3 的 `CapacitorWebView.onCreateInputConnection` 在它为真时返回 `new BaseInputConnection(this, false)`，替换掉 Chromium 自己的输入连接；本应用的 WebView 正是 `CapacitorWebView`（`BridgeActivity` 加载 `capacitor_bridge_layout_main`）。已改为 `false`（见下）。 |
 
 → **App 与 Chrome 的差异不在我们的原生代码里**，而在 WebView 实例/引擎本身：设备上的
 **Android System WebView** 与 Chrome 是两套可独立更新的组件（Chrome 很新、WebView 很旧是最常见的组合）。
