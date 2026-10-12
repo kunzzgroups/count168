@@ -962,3 +962,18 @@ body.is-typing .sc-login-maintenance-track {
   animation: none !important;
   transition: none !important;
 }
+
+/* Wrapper + link for the on-device diagnostics panel (lib/typingProbe.js). */
+.sc-login-diag-wrap {
+  display: block;
+  margin: 0 auto;
+}
+
+.sc-login-diag-link {
+  display: block;
+  margin: 4px auto 0;
+  font-size: 9px;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.55);
+  text-decoration: underline;
+}

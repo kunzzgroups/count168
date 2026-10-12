@@ -35,7 +35,23 @@ export function startTypingProbe() {
   installed = true;
 
   const begin = () => {
-    current = { startedAt: performance.now(), keystrokes: 0, latencies: [], longTaskMs: 0, compositions: 0 };
+    current = {
+      startedAt: performance.now(),
+      keystrokes: 0,
+      latencies: [],
+      longTaskMs: 0,
+      compositions: 0,
+      /*
+       * Delete attribution: the reported symptom is specific — typing is fine, but the delete key has
+       * to be pressed several times before anything happens. Comparing how many times the user
+       * pressed backspace against how many delete events actually reached the page tells us whether
+       * the presses are being consumed by the IME/WebView (page never sees them) or by us.
+       */
+      backspaces: 0,
+      insertInputs: 0,
+      deleteInputs: 0,
+      beforeInputs: 0,
+    };
   };
   const finish = () => {
     if (!current || current.keystrokes === 0) {
@@ -66,14 +82,32 @@ export function startTypingProbe() {
   );
   document.addEventListener(
     "input",
-    () => {
+    (event) => {
       if (!current) return;
       current.keystrokes += 1;
+      const inputType = String(event.inputType || "");
+      if (inputType.indexOf("delete") === 0) current.deleteInputs += 1;
+      else current.insertInputs += 1;
       const startedAt = performance.now();
       requestAnimationFrame(() => {
         if (!current) return;
         current.latencies.push(Math.round(performance.now() - startedAt));
       });
+    },
+    true,
+  );
+  document.addEventListener(
+    "beforeinput",
+    () => {
+      if (current) current.beforeInputs += 1;
+    },
+    true,
+  );
+  document.addEventListener(
+    "keydown",
+    (event) => {
+      if (!current) return;
+      if (event.key === "Backspace" || event.keyCode === 8) current.backspaces += 1;
     },
     true,
   );
@@ -136,6 +170,10 @@ export function readTypingReport() {
           seconds: Math.round((session.endedAt - session.startedAt) / 100) / 10,
           keystrokes: session.keystrokes,
           compositions: session.compositions,
+          backspaces: session.backspaces,
+          insertInputs: session.insertInputs,
+          deleteInputs: session.deleteInputs,
+          beforeInputs: session.beforeInputs,
           paintLatency: stats(session.latencies),
           longTaskMs: session.longTaskMs,
         }
@@ -159,6 +197,15 @@ export function formatTypingReport(report) {
       `typing: ${s.keystrokes} key${s.keystrokes === 1 ? "" : "s"} in ${s.seconds}s` +
         `${s.compositions ? ` · ${s.compositions} IME compositions` : ""}`,
     );
+    lines.push(`insert ${s.insertInputs} · delete ${s.deleteInputs} (beforeinput ${s.beforeInputs})`);
+    if (s.backspaces > s.deleteInputs) {
+      lines.push(
+        `!! backspace pressed ${s.backspaces}x but only ${s.deleteInputs} delete event(s) reached the page`,
+        "   => the missing ones were swallowed by the keyboard/WebView, not by the page",
+      );
+    } else {
+      lines.push(`backspace presses: ${s.backspaces} (all reached the page)`);
+    }
     lines.push(
       s.paintLatency
         ? `paint latency avg ${s.paintLatency.avg}ms · p90 ${s.paintLatency.p90}ms · max ${s.paintLatency.max}ms`

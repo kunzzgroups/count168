@@ -809,9 +809,16 @@ export default function LoginPage() {
             build {BUILD_ID}
           </button>
           {typingReport ? (
-            <pre className="sc-login-diag" onClick={() => setTypingReport(null)}>
-              {formatTypingReport(typingReport)}
-            </pre>
+            <div className="sc-login-diag-wrap">
+              <pre className="sc-login-diag" onClick={() => setTypingReport(null)}>
+                {formatTypingReport(typingReport)}
+              </pre>
+              {/* Opens in the same WebView as the app itself — that is the point: the test page has to
+                  run in the APK's engine, not in Chrome, to say anything about the APK. */}
+              <a className="sc-login-diag-link" href="input-test.html">
+                输入测试页 · input test
+              </a>
+            </div>
           ) : null}
         </div>
       </div>
