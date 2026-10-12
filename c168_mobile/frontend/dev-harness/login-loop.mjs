@@ -275,6 +275,47 @@ async function main() {
       { valueBeforeDelete: beforeDelete, ...afterDelete },
     );
 
+    /* ── D-2b) `?commit=blur-focus`: end the IME session on the delete key (the manual trick) ── */
+    await send("Page.navigate", { url: withFlag("commit=blur-focus") });
+    await waitFor(() => evalInPage("!!document.querySelector('#company-id')"), {
+      label: "login form (commit=blur-focus)",
+      timeout: 40000,
+    });
+    await sleep(400);
+    await evalInPage(
+      "window.__refocusCommitted = 0; window.addEventListener('ec:composition-committed', () => { window.__refocusCommitted += 1; }, true); true",
+    );
+    await evalInPage(`(() => {
+      const el = document.querySelector('#user-id');
+      el.focus();
+      el.value = '';
+      return true;
+    })()`);
+    await send("Input.imeSetComposition", { text: "abcd", selectionStart: 4, selectionEnd: 4 });
+    await sleep(150);
+    const beforeRefocusDelete = await evalInPage("(() => { const el = document.querySelector('#user-id'); return el ? el.value : null; })()");
+    for (const type of ["rawKeyDown", "keyUp"]) {
+      await send("Input.dispatchKeyEvent", {
+        type,
+        key: "Backspace",
+        code: "Backspace",
+        windowsVirtualKeyCode: 8,
+        nativeVirtualKeyCode: 8,
+      });
+    }
+    await sleep(300);
+    const afterRefocusDelete = await evalInPage(
+      "(() => { const el = document.querySelector('#user-id'); return { value: el ? el.value : null, count: window.__refocusCommitted || 0, focused: document.activeElement === el }; })()",
+    );
+    record(
+      "login: '?commit=blur-focus' ends the IME session on delete (and keeps the field focused)",
+      afterRefocusDelete.count >= 1 &&
+        afterRefocusDelete.focused === true &&
+        typeof afterRefocusDelete.value === "string" &&
+        afterRefocusDelete.value.length < String(beforeRefocusDelete || "").length,
+      { valueBeforeDelete: beforeRefocusDelete, ...afterRefocusDelete },
+    );
+
     /* the pause variant is still selectable, and must hand over without any key press */
     await send("Page.navigate", { url: withFlag("commit=pause") });
     await waitFor(() => evalInPage("!!document.querySelector('#company-id')"), {

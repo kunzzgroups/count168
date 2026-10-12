@@ -22,7 +22,7 @@
  * forcing a commit mid-word would break pinyin candidate selection.
  */
 const STORAGE_KEY = "ec_commit_mode";
-const MODES = ["on-backspace", "pause", "always", "none"];
+const MODES = ["on-backspace", "blur-focus", "pause", "always", "none"];
 /** Idle time for the `pause` mode. Short on purpose: the reported stalls are seconds long. */
 export const PAUSE_MS = 300;
 
@@ -67,6 +67,15 @@ export function commitProps(mode) {
   }
   if (mode === "always") {
     return { commitCompositionOnDeleteKey: true, commitCompositionOnInput: true, commitCompositionOnIdleMs: 0 };
+  }
+  if (mode === "blur-focus") {
+    /* End the IME session on the delete key (the manual "tap out and back in" trick, automated). */
+    return {
+      commitCompositionOnDeleteKey: true,
+      commitCompositionByRefocus: true,
+      commitCompositionOnInput: false,
+      commitCompositionOnIdleMs: 0,
+    };
   }
   if (mode === "pause") {
     return { commitCompositionOnDeleteKey: true, commitCompositionOnInput: false, commitCompositionOnIdleMs: PAUSE_MS };

@@ -47,6 +47,12 @@ export default function KeyboardOwnedInput({
    */
   commitCompositionOnDeleteKey = true,
   /**
+   * Stronger variant of the above: instead of collapsing the selection, drop and immediately restore
+   * focus, which *ends the IME's editing session* — exactly what users do by hand ("tap out of the box
+   * and tap back in, then delete works"). Tried because Sogou ignores the selection-based hand-over.
+   */
+  commitCompositionByRefocus = false,
+  /**
    * Force the keyboard to *commit* a composition after the user pauses for this many ms (0 = never).
    *
    * Why this exists: with Sogou (and other Chinese IMEs) the text can sit in the **IME's own
@@ -91,6 +97,7 @@ export default function KeyboardOwnedInput({
   const defer = false;
   const commitOnIdle = commitCompositionOnIdleMs > 0;
   const commitOnDeleteKey = Boolean(commitCompositionOnDeleteKey);
+  const refocusOnDeleteKey = Boolean(commitCompositionByRefocus);
   const commitOnInput = Boolean(commitCompositionOnInput);
   /** The last text we published or adopted — compared against, never written back blindly. */
   const lastTextRef = useRef(initialValue);
@@ -120,8 +127,24 @@ export default function KeyboardOwnedInput({
     };
     const commitNow = () => {
       idleTimer = 0;
+      if (!composing && !refocusOnDeleteKey) return;
+      if (!commitOnIdle && !commitOnInput && !commitOnDeleteKey && !refocusOnDeleteKey) return;
+      if (refocusOnDeleteKey) {
+        /*
+         * Ending the IME session beats moving the caret: this is the manual workaround users found,
+         * done in place. The keyboard is not dismissed for a visible moment because focus returns in the
+         * same task, and `preventDefault()` is still not called — the browser performs the deletion.
+         */
+        try {
+          el.blur();
+          el.focus();
+          window.dispatchEvent(new CustomEvent("ec:composition-committed"));
+          return;
+        } catch {
+          /* fall through to the selection-based hand-over */
+        }
+      }
       if (!composing) return;
-      if (!commitOnIdle && !commitOnInput && !commitOnDeleteKey) return;
       try {
         const end = el.value.length;
         el.setSelectionRange(end, end);
@@ -168,7 +191,7 @@ export default function KeyboardOwnedInput({
      * deliberately not called — the browser still performs the deletion, we only hand the text over.
      */
     const onKeyDown = (event) => {
-      if (!commitOnDeleteKey) return;
+      if (!commitOnDeleteKey && !refocusOnDeleteKey) return;
       const isDeleteKey =
         event.key === "Backspace" || event.key === "Delete" || event.keyCode === 8 || event.keyCode === 46;
       if (!isDeleteKey) return;
@@ -213,7 +236,7 @@ export default function KeyboardOwnedInput({
       el.removeEventListener("keydown", onKeyDown, true);
       el.removeEventListener("blur", onBlur);
     };
-  }, [needsText, defer, commitOnIdle, commitCompositionOnIdleMs, commitOnInput, commitOnDeleteKey, applyValueOnBlur]);
+  }, [needsText, defer, commitOnIdle, commitCompositionOnIdleMs, commitOnInput, commitOnDeleteKey, refocusOnDeleteKey, applyValueOnBlur]);
 
   useEffect(() => {
     const el = inputRef.current;

@@ -44,6 +44,8 @@ const PasswordInput = forwardRef(function PasswordInput(
     commitCompositionOnInput = false,
     /** …or the moment a delete key is pressed (the default; see KeyboardOwnedInput). */
     commitCompositionOnDeleteKey = true,
+    /** …by ending the IME session (blur + focus) instead of moving the caret. */
+    commitCompositionByRefocus = false,
     showLabel = "Show password",
     hideLabel = "Hide password",
     className = "",
@@ -83,6 +85,7 @@ const PasswordInput = forwardRef(function PasswordInput(
         commitCompositionOnIdleMs={commitCompositionOnIdleMs}
         commitCompositionOnInput={commitCompositionOnInput}
         commitCompositionOnDeleteKey={commitCompositionOnDeleteKey}
+        commitCompositionByRefocus={commitCompositionByRefocus}
         onValueChange={(text) => onChange?.({ target: { value: text } })}
         disabled={disabled}
         spellCheck={false}
