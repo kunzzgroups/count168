@@ -5,9 +5,11 @@
  *
  * Drives the real `AddTransactionSheet` → AccountPicker in a phone-sized headless Chromium:
  *   A) IME / word-mode typing  → search must filter and must not be rewritten
+ *   A2) keyboard-written text  → must survive React's next render (Android Gboard)
  *   B) delete after filtering  → jank must not grow with the account count
  *   C) opening the picker      → must not freeze while mounting the list
  *   D) tapping over the panel   → must reach the panel, not the row's hidden date input
+ *   E) reopening the panel      → the search field starts empty again
  * Zero dependencies: launches Chrome directly and talks CDP over the Node WebSocket.
  */
 import { spawn } from "node:child_process";
@@ -322,6 +324,68 @@ async function main() {
       { rendered: synth.rendered, expected: synth.expected, value: synth.value },
     );
 
+    /* ── A2) the text the keyboard typed must survive React's next render ──
+       Android/Gboard writes the composing text into the field itself; the `input` event can
+       arrive later (or be de-duplicated by React's value tracker). If React then renders — any
+       state change, e.g. the list window growing — a controlled `value=` writes its own, older
+       string back into the field: the typed characters disappear, the list keeps filtering on
+       something else, and only a delete (which produces a fresh event) re-aligns them. On the
+       phone that reads as "typing finds nothing until I delete a character". */
+    await evalInPage("window.__harness.setQuery(''); true");
+    await sleep(250);
+    const imeWrite = await evalInPage(`(() => {
+      const input = document.querySelector('.m-tx-account-picker-search input');
+      if (!input) return { error: 'no search input' };
+      input.focus();
+      input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: '' }));
+      /* the keyboard writes the text itself — no event reaches React yet */
+      input.value = '1015';
+      return { valueAfterWrite: input.value };
+    })()`);
+    /* Force an unrelated re-render of the picker: growing the list window is a state change. */
+    await evalInPage("window.__harness.scrollOptionsToEnd(); true");
+    await sleep(450);
+    const afterRerender = await evalInPage(`(() => {
+      const input = document.querySelector('.m-tx-account-picker-search input');
+      return { value: input ? input.value : null };
+    })()`);
+    /* the keyboard now commits the word */
+    await evalInPage(`(() => {
+      const input = document.querySelector('.m-tx-account-picker-search input');
+      if (!input) return false;
+      input.dispatchEvent(
+        new CompositionEvent('compositionend', { bubbles: true, data: input.value }),
+      );
+      input.dispatchEvent(
+        new InputEvent('input', {
+          bubbles: true,
+          isComposing: false,
+          data: input.value,
+          inputType: 'insertText',
+        }),
+      );
+      return true;
+    })()`);
+    await sleep(400);
+    const afterCommit = await evalInPage("window.__harness.snapshot()");
+    record(
+      "ime: text the keyboard typed survives the next render and still filters the list",
+      imeWrite.valueAfterWrite === "1015" &&
+        afterRerender.value === "1015" &&
+        afterCommit.value === "1015" &&
+        afterCommit.rendered > 0 &&
+        afterCommit.prefixMatches,
+      {
+        ...imeWrite,
+        valueAfterRerender: afterRerender.value,
+        valueAfterCommit: afterCommit.value,
+        filtered: afterCommit.rendered,
+        expected: afterCommit.expected,
+      },
+    );
+    await evalInPage("window.__harness.setQuery(''); true");
+    await sleep(250);
+
     /* ── B) delete after filtering ── */
     const scenario = await measureDeletePhase();
     record(
@@ -364,6 +428,18 @@ async function main() {
       triggerText: picked,
       expected: secondBox.text,
     });
+
+    /* ── E) reopening the panel must start from an empty field and the full list ──
+       The search field is uncontrolled, so clearing it is the panel's job, not React's. */
+    await openPicker();
+    const reopened = await evalInPage("window.__harness.snapshot()");
+    record(
+      "reopen: the search field starts empty and the list is not still filtered",
+      reopened.value === "" && reopened.rendered > 0 && reopened.rendered < reopened.expected,
+      { value: reopened.value, rendered: reopened.rendered, expected: reopened.expected },
+    );
+    await evalInPage("(() => { const b = document.querySelector('.m-tx-account-picker-close'); if (b) b.click(); return true; })()");
+    await sleep(300);
 
     /* ── perf gate: jank must not scale with the account count ── */
     await loadHarness(FLOOR_N);

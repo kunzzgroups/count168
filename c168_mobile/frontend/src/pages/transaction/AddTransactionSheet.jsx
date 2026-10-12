@@ -106,6 +106,8 @@ function AccountPicker({
   const [query, setQuery] = useState("");
   const [windowSize, setWindowSize] = useState(OPTION_WINDOW_STEP);
   const searchRef = useRef(null);
+  /** Mirrors the field's own text; see `applyQuery`. */
+  const queryRef = useRef("");
 
   const rows = useMemo(() => (Array.isArray(options) ? options : []), [options]);
 
@@ -158,16 +160,18 @@ function AccountPicker({
     [growWindow],
   );
 
-  /** A new query starts the window over, so each keystroke mounts only one page of rows. */
-  const applyQuery = useCallback(
-    (next) => {
-      const text = String(next ?? "");
-      if (text === query) return;
-      setQuery(text);
-      setWindowSize(OPTION_WINDOW_STEP);
-    },
-    [query],
-  );
+  /**
+   * A new query starts the window over, so each keystroke mounts only one page of rows.
+   * The guard compares against a ref instead of `query`: the field is driven by native events
+   * (see the effect below), and a stale closure would silently drop a keystroke.
+   */
+  const applyQuery = useCallback((next) => {
+    const text = String(next ?? "");
+    if (text === queryRef.current) return;
+    queryRef.current = text;
+    setQuery(text);
+    setWindowSize(OPTION_WINDOW_STEP);
+  }, []);
 
   /**
    * The sheet needs to know while a panel is up: its `DateTapRow` overlays a native
@@ -185,12 +189,39 @@ function AccountPicker({
   const close = useCallback(() => {
     setPanelOpen(false);
     setQuery("");
+    queryRef.current = "";
     setWindowSize(OPTION_WINDOW_STEP);
   }, [setPanelOpen]);
 
   useEffect(() => {
-    if (open) searchRef.current?.focus();
-  }, [open]);
+    if (!open) return undefined;
+    const input = searchRef.current;
+    if (!input) return undefined;
+
+    /*
+     * The field stays **uncontrolled** on purpose, and is listened to through native listeners:
+     *
+     * - Android keyboards (Gboard) write the composing text into the DOM themselves, out of
+     *   React's sight. A controlled `value=` then writes its own, older string back on the next
+     *   render — the typed characters vanish, the list keeps filtering on something else, and only
+     *   a delete (a fresh event) re-aligns them. Reported as "typing finds nothing until I delete
+     *   a character".
+     * - React de-duplicates an `input` event whose value its own tracker already saw, which is
+     *   exactly what happens after the keyboard wrote the text itself. A native listener always
+     *   receives it, so the list can never lag behind the field.
+     */
+    input.value = "";
+    queryRef.current = "";
+    const onInput = (e) => applyQuery(e.currentTarget.value);
+    const onCompositionEnd = (e) => applyQuery(e.currentTarget.value);
+    input.addEventListener("input", onInput);
+    input.addEventListener("compositionend", onCompositionEnd);
+    input.focus();
+    return () => {
+      input.removeEventListener("input", onInput);
+      input.removeEventListener("compositionend", onCompositionEnd);
+    };
+  }, [open, applyQuery]);
 
   // Escape closes only this panel; the sheet's own Escape handler must not fire with it.
   useEffect(() => {
@@ -248,17 +279,12 @@ function AccountPicker({
 
           <label className="m-tx-account-picker-search">
             <i className="fas fa-magnifying-glass" aria-hidden="true" />
-            {/*
-             * `onInput`/`onCompositionEnd` read the same DOM value as `onChange`: some phone
-             * keyboards only hand the text over when a word composition finishes.
-             */}
+            {/* Uncontrolled on purpose: React must never write into a field the phone's keyboard
+                owns — see the open effect above. */}
             <input
               ref={searchRef}
               type="text"
-              value={query}
-              onChange={(e) => applyQuery(e.target.value)}
-              onInput={(e) => applyQuery(e.currentTarget.value)}
-              onCompositionEnd={(e) => applyQuery(e.currentTarget.value)}
+              defaultValue=""
               placeholder={searchPlaceholder}
               autoComplete="off"
               autoCorrect="off"
