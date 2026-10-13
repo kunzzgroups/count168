@@ -267,8 +267,13 @@ function extractCellLines(sourceCell) {
     /<br\s*\/?>/i.test(cellHtml) ||
     /<br\s+[^>]*>/i.test(cellHtml) ||
     /<br\s+style[^>]*>/i.test(cellHtml);
+  // Excel wraps long cell text with source newlines (e.g. "TitanXGaming\r\n - Clotplay");
+  // real Alt+Enter line breaks arrive as <br>, so for Excel cells a bare newline is just a space.
+  const openTag = (sourceCell.outerHTML || "").slice(0, (sourceCell.outerHTML || "").indexOf(">") + 1);
+  const isExcelCell = /\bclass\s*=\s*["']?xl\d+|mso-/i.test(openTag);
   const hasNewline =
-    cellText.includes("\n") || cellText.includes("\r\n") || cellText.includes("\r");
+    !isExcelCell &&
+    (cellText.includes("\n") || cellText.includes("\r\n") || cellText.includes("\r"));
 
   let lines = [];
 
@@ -470,7 +475,11 @@ export function buildFormatDataCellPatch(sourceCell, displayText) {
   if (!cellContent || cellContent.trim() === "") {
     cellContent = sourceCell.textContent || "";
   }
-  const cellText = sourceCell.textContent || sourceCell.innerText || "";
+  let cellText = sourceCell.textContent || sourceCell.innerText || "";
+  const openTag = (sourceCell.outerHTML || "").slice(0, (sourceCell.outerHTML || "").indexOf(">") + 1);
+  if (/\bclass\s*=\s*["']?xl\d+|mso-/i.test(openTag) && !/<br\b/i.test(cellContent)) {
+    cellText = cellText.replace(/\s*[\r\n]+\s*/g, " ");
+  }
 
   // Match org 1.Text: keep classes / icons / inline styles (do not strip class attrs).
   const cleanContent = sanitizePastedCellHtml(cellContent);
