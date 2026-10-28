@@ -93,7 +93,7 @@ export const TRANSACTION_I18N = {
     paymentHistorySubtitle: "Complete transaction history and balance details",
     paymentHistoryShowingEntries: "Showing {count} entries",
     paymentHistoryBalanceHint:
-      "Newest first; B/F stays on top. Balance is the running balance after that entry (not reordered).",
+      "Oldest first, newest at the bottom; B/F stays on top. Balance is the running balance after that entry (not reordered).",
     paymentHistoryTapRowHint: "Tap a row to show description and remark",
     paymentHistoryDetails: "Details",
     dateCompact: "Date",
@@ -278,7 +278,7 @@ export const TRANSACTION_I18N = {
     exportPdfMissingAccount: "缺少账户信息，请关闭后重新打开 Payment History。",
     paymentHistorySubtitle: "完整交易历史与余额明细",
     paymentHistoryShowingEntries: "共 {count} 条记录",
-    paymentHistoryBalanceHint: "最新在上，B/F 固定置顶。余额为该笔发生后的累计余额（不会因排序重算）。",
+    paymentHistoryBalanceHint: "最旧在上、最新在底部，B/F 固定置顶。余额为该笔发生后的累计余额（不会因排序重算）。",
     paymentHistoryTapRowHint: "点击一行可查看说明与备注",
     paymentHistoryDetails: "详情",
     dateCompact: "日期",
