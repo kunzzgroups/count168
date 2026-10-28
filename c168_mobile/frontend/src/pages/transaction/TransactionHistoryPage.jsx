@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useOutletContext, useSearchParams } from "react-router-dom";
 import MobileShell from "../../components/layout/MobileShell.jsx";
 import MobileSubpageHeader from "../../components/layout/MobileSubpageHeader.jsx";
@@ -40,15 +40,15 @@ function historyDateSortKey(row) {
   return raw;
 }
 
-/** Newest date first; B/F (period opening) always stays on top. */
-function sortHistoryNewestFirst(rows) {
+/** Oldest date first, newest at the bottom; B/F (period opening) always stays on top. */
+function sortHistoryNewestLast(rows) {
   return [...(rows || [])].sort((a, b) => {
     const aBf = a?.row_type === "bf" ? 0 : 1;
     const bBf = b?.row_type === "bf" ? 0 : 1;
     if (aBf !== bBf) return aBf - bBf;
-    const byDate = historyDateSortKey(b).localeCompare(historyDateSortKey(a));
+    const byDate = historyDateSortKey(a).localeCompare(historyDateSortKey(b));
     if (byDate !== 0) return byDate;
-    return historyRowId(b) - historyRowId(a);
+    return historyRowId(a) - historyRowId(b);
   });
 }
 
@@ -124,7 +124,17 @@ export default function TransactionHistoryPage() {
     accountCode: scope.accountCode,
   });
 
-  const displayRows = useMemo(() => sortHistoryNewestFirst(rows), [rows]);
+  const displayRows = useMemo(() => sortHistoryNewestLast(rows), [rows]);
+
+  // Newest row is at the bottom: jump there once per query when the first batch has painted.
+  const bottomRef = useRef(null);
+  const scrolledKeyRef = useRef("");
+  const queryKey = `${scope.accountDbId}|${scope.dateFrom}|${scope.dateTo}|${scope.currency}`;
+  useEffect(() => {
+    if (loading || displayRows.length === 0 || scrolledKeyRef.current === queryKey) return;
+    scrolledKeyRef.current = queryKey;
+    bottomRef.current?.scrollIntoView({ block: "end" });
+  }, [loading, displayRows.length, queryKey]);
 
   if (!paramsReady) {
     return <Navigate to="/transaction" replace />;
@@ -358,6 +368,7 @@ export default function TransactionHistoryPage() {
             {isLoadingMore ? (
               <p className="m-tx-hist-loading m-tx-hist-loading--more">{m.loadingMoreHistory || m.loadingHistory}</p>
             ) : null}
+            <div ref={bottomRef} aria-hidden="true" />
           </div>
         )}
       </div>
